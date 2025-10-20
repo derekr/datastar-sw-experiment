@@ -1,0 +1,15 @@
+{
+  "name": "datastar-sw",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build"
+  },
+  "dependencies": {
+    "@remix-run/fetch-router": "^0.6.0"
+  },
+  "devDependencies": {
+    "vite": "^5.4.11"
+  }
+}
