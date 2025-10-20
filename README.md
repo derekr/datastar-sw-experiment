@@ -2,6 +2,8 @@
 
 An experimental implementation of a server running inside a Service Worker that maintains SSE connections with Datastar.
 
+![Screenshot](screenshot.png)
+
 ## Architecture
 
 This project demonstrates:
