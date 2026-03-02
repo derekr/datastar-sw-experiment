@@ -245,28 +245,22 @@ async function migrateFromV1() {
 }
 
 // Migrate pre-boards data: ensure all columns have a boardId and a board exists.
+// Appends a board.created event then rebuilds the projection. The column.created
+// upcaster (v1→v2) adds boardId:'default' to existing column events during replay,
+// so no direct projection writes are needed.
 async function migrateToBoards() {
   const db = await dbPromise
   const boards = await db.getAll('boards')
   if (boards.length > 0) return // already migrated
   const columns = await db.getAll('columns')
   if (columns.length === 0) return // nothing to migrate
-  // Create a default board and tag existing columns
-  const tx = db.transaction(ALL_STORES, 'readwrite')
-  const boardEvent = createEvent('board.created', {
+  // Append board event and let rebuildProjection handle column tagging via upcaster
+  await appendEvent(createEvent('board.created', {
     id: 'default',
     title: 'My Board',
     createdAt: Date.now(),
-  })
-  await tx.objectStore('events').put(boardEvent)
-  await applyEvent(boardEvent, tx)
-  // Tag columns with boardId
-  for (const col of columns) {
-    if (!col.boardId) {
-      await tx.objectStore('columns').put({ ...col, boardId: 'default' })
-    }
-  }
-  await tx.done
+  }))
+  await rebuildProjection()
 }
 
 // Seed: no-op if any boards exist. Fresh install creates nothing — user creates their first board.
