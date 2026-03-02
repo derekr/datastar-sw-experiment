@@ -82,8 +82,8 @@ async function applyEvent(event, tx) {
       const colStore = tx.objectStore('columns')
       const cardStore = tx.objectStore('cards')
       await colStore.delete(data.id)
-      const allCards = await cardStore.getAll()
-      for (const card of allCards.filter(c => c.columnId === data.id)) {
+      const colCards = await cardStore.index('byColumn').getAll(data.id)
+      for (const card of colCards) {
         await cardStore.delete(card.id)
       }
       break
