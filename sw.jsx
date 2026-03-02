@@ -9,6 +9,8 @@ import { raw } from 'hono/html'
 // Event schema versions. Bump when event shape changes.
 const EVENT_VERSIONS = {
   'column.created': 1,
+  'column.deleted': 1,
+  'column.moved': 1,
   'card.created': 1,
   'card.moved': 1,
   'card.deleted': 1,
@@ -45,6 +47,37 @@ async function applyEvent(event, tx) {
     case 'column.created':
       await tx.objectStore('columns').put(data)
       break
+
+    case 'column.deleted': {
+      // Delete column and all its cards
+      const colStore = tx.objectStore('columns')
+      const cardStore = tx.objectStore('cards')
+      await colStore.delete(data.id)
+      const allCards = await cardStore.getAll()
+      for (const card of allCards.filter(c => c.columnId === data.id)) {
+        await cardStore.delete(card.id)
+      }
+      // Reposition remaining columns
+      const remaining = (await colStore.getAll()).sort((a, b) => a.position - b.position)
+      for (let i = 0; i < remaining.length; i++) {
+        await colStore.put({ ...remaining[i], position: i })
+      }
+      break
+    }
+
+    case 'column.moved': {
+      const colStore = tx.objectStore('columns')
+      const col = await colStore.get(data.id)
+      if (!col) break
+      const allCols = (await colStore.getAll())
+        .filter(c => c.id !== data.id)
+        .sort((a, b) => a.position - b.position)
+      allCols.splice(data.position, 0, { ...col })
+      for (let i = 0; i < allCols.length; i++) {
+        await colStore.put({ ...allCols[i], position: i })
+      }
+      break
+    }
 
     case 'card.created':
       await tx.objectStore('cards').put(data)
@@ -267,68 +300,94 @@ function Card({ card }) {
   )
 }
 
-function Column({ col, cards }) {
+function Column({ col, cards, columnCount }) {
   const colCards = cards
     .filter(c => c.columnId === col.id)
     .sort((a, b) => a.position - b.position)
 
-  // dragover: calculate drop index from cursor Y vs card midpoints, show indicator
-  const dragover = [
+  // --- Card drag-and-drop on .cards-container ---
+
+  const cardDragover = [
+    // Only handle card drags (not column drags)
+    `if (evt.dataTransfer.types.includes('columnid')) return`,
     `evt.preventDefault()`,
     `evt.dataTransfer.dropEffect = 'move'`,
     `const container = evt.currentTarget`,
     `container.classList.add('drag-over')`,
-    // Get non-dragging cards for position calculation
     `const cards = Array.from(container.querySelectorAll('.card:not([data-dragging])'))`,
-    // Calculate drop index from cursor Y vs card midpoints
     `let dropIdx = cards.length`,
     `for (let i = 0; i < cards.length; i++) { const rect = cards[i].getBoundingClientRect(); if (evt.clientY < rect.top + rect.height / 2) { dropIdx = i; break } }`,
-    // Hysteresis: only update indicator if index changed
     `if (container.getAttribute('data-drop-index') === String(dropIdx)) return`,
     `container.setAttribute('data-drop-index', dropIdx)`,
-    // Create indicator if needed, insert at drop position
     `let indicator = container.querySelector('.drop-indicator')`,
     `if (!indicator) { indicator = document.createElement('div'); indicator.className = 'drop-indicator'; indicator.setAttribute('data-card-id', 'drop-indicator') }`,
     `if (cards[dropIdx]) { container.insertBefore(indicator, cards[dropIdx]) } else { container.appendChild(indicator) }`,
   ].join('; ')
 
-  const dragleave = [
-    // Only remove if leaving the container (not entering a child)
+  const cardDragleave = [
     `if (evt.currentTarget.contains(evt.relatedTarget)) return`,
     `evt.currentTarget.classList.remove('drag-over')`,
     `evt.currentTarget.removeAttribute('data-drop-index')`,
     `const ind = evt.currentTarget.querySelector('.drop-indicator'); if (ind) ind.remove()`,
   ].join('; ')
 
-  const drop = [
+  const cardDrop = [
+    // Only handle card drags
+    `if (!evt.dataTransfer.types.includes('cardid')) return`,
     `evt.preventDefault()`,
     `const container = evt.currentTarget`,
     `container.classList.remove('drag-over')`,
-    // Read drop index from the indicator position, not recalculating
     `const dropIdx = parseInt(container.getAttribute('data-drop-index') || '0', 10)`,
-    // Clean up indicator
     `const ind = container.querySelector('.drop-indicator'); if (ind) ind.remove()`,
     `container.removeAttribute('data-drop-index')`,
     `const cardId = evt.dataTransfer.getData('cardId')`,
-    // Start FLIP: snapshot original position, animate from cursor after morph lands
     `window.__setDropFlip(cardId, evt.clientX, evt.clientY)`,
     `$dropColumnId = '${col.id}'`,
     `$dropPosition = dropIdx`,
     `@put('/cards/' + cardId + '/move')`,
   ].join('; ')
 
+  // --- Column drag (on .column itself) ---
+
+  const colDragstart = [
+    `evt.dataTransfer.effectAllowed = 'move'`,
+    `evt.dataTransfer.setData('columnId', '${col.id}')`,
+    `evt.currentTarget.setAttribute('data-dragging', '')`,
+  ].join('; ')
+
+  const colDragend = [
+    `evt.currentTarget.removeAttribute('data-dragging')`,
+    `document.querySelectorAll('.col-drop-indicator').forEach(el => el.remove())`,
+    `document.querySelectorAll('.column').forEach(el => el.classList.remove('drag-over'))`,
+    `document.querySelector('.columns')?.removeAttribute('data-drop-index')`,
+  ].join('; ')
+
   return (
-    <div class="column" id={`column-${col.id}`} style={`view-transition-name: col-${col.id}`}>
+    <div
+      class="column"
+      id={`column-${col.id}`}
+      style={`view-transition-name: col-${col.id}`}
+      draggable="true"
+      data-on:dragstart={colDragstart}
+      data-on:dragend={colDragend}
+    >
       <div class="column-header">
+        <span class="drag-handle">⠿</span>
         <h2>{col.title}</h2>
         <span class="count">{colCards.length}</span>
+        {columnCount > 1 && (
+          <button
+            class="col-delete-btn"
+            data-on:click__viewtransition={`@delete('/columns/${col.id}')`}
+          >×</button>
+        )}
       </div>
       <div
         class="cards-container"
         data-column-id={col.id}
-        data-on:dragover={dragover}
-        data-on:dragleave={dragleave}
-        data-on:drop={drop}
+        data-on:dragover={cardDragover}
+        data-on:dragleave={cardDragleave}
+        data-on:drop={cardDrop}
       >
         {colCards.length === 0
           ? <p class="empty">No cards yet</p>
@@ -346,12 +405,60 @@ function Column({ col, cards }) {
 }
 
 function Board({ columns, cards }) {
+  // --- Column drop zone on .columns ---
+
+  const colDragover = [
+    // Only handle column drags
+    `if (!evt.dataTransfer.types.includes('columnid')) return`,
+    `evt.preventDefault()`,
+    `evt.dataTransfer.dropEffect = 'move'`,
+    `const container = evt.currentTarget`,
+    `const cols = Array.from(container.querySelectorAll('.column:not([data-dragging])'))`,
+    `let dropIdx = cols.length`,
+    `for (let i = 0; i < cols.length; i++) { const rect = cols[i].getBoundingClientRect(); if (evt.clientX < rect.left + rect.width / 2) { dropIdx = i; break } }`,
+    `if (container.getAttribute('data-drop-index') === String(dropIdx)) return`,
+    `container.setAttribute('data-drop-index', dropIdx)`,
+    `let indicator = container.querySelector('.col-drop-indicator')`,
+    `if (!indicator) { indicator = document.createElement('div'); indicator.className = 'col-drop-indicator' }`,
+    `if (cols[dropIdx]) { container.insertBefore(indicator, cols[dropIdx]) } else { container.appendChild(indicator) }`,
+  ].join('; ')
+
+  const colDragleave = [
+    `if (evt.currentTarget.contains(evt.relatedTarget)) return`,
+    `evt.currentTarget.removeAttribute('data-drop-index')`,
+    `const ind = evt.currentTarget.querySelector('.col-drop-indicator'); if (ind) ind.remove()`,
+  ].join('; ')
+
+  const colDrop = [
+    `if (!evt.dataTransfer.types.includes('columnid')) return`,
+    `evt.preventDefault()`,
+    `const container = evt.currentTarget`,
+    `const dropIdx = parseInt(container.getAttribute('data-drop-index') || '0', 10)`,
+    `const ind = container.querySelector('.col-drop-indicator'); if (ind) ind.remove()`,
+    `container.removeAttribute('data-drop-index')`,
+    `const columnId = evt.dataTransfer.getData('columnId')`,
+    `$dropPosition = dropIdx`,
+    `@put('/columns/' + columnId + '/move')`,
+  ].join('; ')
+
   return (
     <div id="board">
       <h1>Kanban Board</h1>
-      <div class="columns">
-        {columns.map(col => <Column col={col} cards={cards} />)}
+      <div
+        class="columns"
+        data-on:dragover={colDragover}
+        data-on:dragleave={colDragleave}
+        data-on:drop={colDrop}
+      >
+        {columns.map(col => <Column col={col} cards={cards} columnCount={columns.length} />)}
       </div>
+      <form
+        class="add-col-form"
+        data-on:submit__prevent__viewtransition="@post('/columns', {contentType: 'form'}); evt.target.reset()"
+      >
+        <input name="title" type="text" placeholder="Add a column..." autocomplete="off" />
+        <button type="submit">+ Column</button>
+      </form>
     </div>
   )
 }
@@ -386,14 +493,40 @@ h1 { font-size: 1.5rem; font-weight: 600; margin-bottom: 24px; }
   min-width: 300px;
   max-width: 300px;
   flex-shrink: 0;
+  cursor: grab;
+}
+
+.column:active { cursor: grabbing; }
+.column[data-dragging] { opacity: 0.3; transform: scale(0.97); }
+
+.col-drop-indicator {
+  width: 3px;
+  min-height: 80px;
+  background: #6366f1;
+  border-radius: 2px;
+  pointer-events: none;
+  view-transition-name: none;
+  box-shadow: 0 0 8px rgba(99, 102, 241, 0.5);
+  flex-shrink: 0;
+  align-self: stretch;
 }
 
 .column-header {
   display: flex;
-  justify-content: space-between;
   align-items: center;
+  gap: 8px;
   margin-bottom: 12px;
 }
+
+.drag-handle {
+  color: #475569;
+  font-size: 0.75rem;
+  cursor: grab;
+  user-select: none;
+  line-height: 1;
+}
+
+.drag-handle:active { cursor: grabbing; }
 
 .column-header h2 {
   font-size: 0.8rem;
@@ -401,7 +534,21 @@ h1 { font-size: 1.5rem; font-weight: 600; margin-bottom: 24px; }
   letter-spacing: 0.05em;
   color: #94a3b8;
   font-weight: 600;
+  flex: 1;
 }
+
+.col-delete-btn {
+  background: none;
+  border: none;
+  color: #475569;
+  cursor: pointer;
+  font-size: 0.9rem;
+  padding: 0 4px;
+  line-height: 1;
+  transition: color 0.15s;
+}
+
+.col-delete-btn:hover { color: #ef4444; }
 
 .count {
   font-size: 0.75rem;
@@ -506,6 +653,40 @@ h1 { font-size: 1.5rem; font-weight: 600; margin-bottom: 24px; }
 }
 
 .add-form button:hover { background: #4f46e5; }
+
+.add-col-form {
+  display: flex;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.add-col-form input {
+  background: #1e293b;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  padding: 10px 14px;
+  color: #e2e8f0;
+  font-size: 0.85rem;
+  width: 200px;
+}
+
+.add-col-form input::placeholder { color: #475569; }
+.add-col-form input:focus { outline: none; border-color: #6366f1; }
+
+.add-col-form button {
+  background: #334155;
+  border: 1px solid #475569;
+  border-radius: 8px;
+  color: #e2e8f0;
+  padding: 10px 16px;
+  cursor: pointer;
+  font-size: 0.85rem;
+  font-weight: 600;
+  white-space: nowrap;
+  transition: background 0.15s;
+}
+
+.add-col-form button:hover { background: #475569; }
 
 ::view-transition-group(*) {
   animation-duration: 200ms;
@@ -843,6 +1024,49 @@ app.put('/cards/:cardId/move', async (c) => {
   await appendEvent(createEvent('card.moved', {
     id: cardId,
     columnId: targetColumnId,
+    position: targetPosition,
+  }))
+  return c.body(null, 204)
+})
+
+// Command: create column
+app.post('/columns', async (c) => {
+  const body = await c.req.parseBody()
+  const title = String(body.title || '').trim()
+  if (!title) return c.body(null, 204)
+
+  const db = await dbPromise
+  const columns = await db.getAll('columns')
+
+  await appendEvent(createEvent('column.created', {
+    id: crypto.randomUUID(),
+    title,
+    position: columns.length,
+  }))
+  return c.body(null, 204)
+})
+
+// Command: delete column (and its cards)
+app.delete('/columns/:columnId', async (c) => {
+  await appendEvent(createEvent('column.deleted', {
+    id: c.req.param('columnId'),
+  }))
+  return c.body(null, 204)
+})
+
+// Command: move column
+app.put('/columns/:columnId/move', async (c) => {
+  const columnId = c.req.param('columnId')
+  const body = await c.req.json()
+  const targetPosition = parseInt(body.dropPosition, 10)
+  if (isNaN(targetPosition)) return c.body(null, 400)
+
+  const db = await dbPromise
+  const col = await db.get('columns', columnId)
+  if (!col) return c.body(null, 404)
+
+  await appendEvent(createEvent('column.moved', {
+    id: columnId,
     position: targetPosition,
   }))
   return c.body(null, 204)
