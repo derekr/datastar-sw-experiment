@@ -54,8 +54,13 @@ function createEvent(type, data, { correlationId, causationId } = {}) {
 
 // Apply a single (upcasted) event to the projection stores within a transaction.
 // Must handle missing entities gracefully (events may reference deleted items).
+// If upcasting changed the event, persist the upcasted version to avoid re-upcasting on future replays.
 async function applyEvent(event, tx) {
-  const { type, data } = upcast(event)
+  const upcasted = upcast(event)
+  if (upcasted.v !== event.v) {
+    await tx.objectStore('events').put({ ...upcasted, seq: event.seq })
+  }
+  const { type, data } = upcasted
   switch (type) {
     case 'board.created':
       await tx.objectStore('boards').put(data)
