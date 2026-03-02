@@ -147,15 +147,27 @@ const bus = new EventTarget()
 // Idempotent: skips events already in the log (by event ID).
 const ALL_STORES = ['events', 'boards', 'columns', 'cards']
 
-async function appendEvent(event) {
+// Append multiple events atomically in a single IDB transaction.
+// Dispatches one bus event per appended event after commit.
+async function appendEvents(events) {
   const db = await dbPromise
   const tx = db.transaction(ALL_STORES, 'readwrite')
-  const existing = await tx.objectStore('events').index('byId').get(event.id)
-  if (existing) { await tx.done; return }
-  await tx.objectStore('events').put(event)
-  await applyEvent(event, tx)
+  const appended = []
+  for (const event of events) {
+    const existing = await tx.objectStore('events').index('byId').get(event.id)
+    if (existing) continue
+    await tx.objectStore('events').put(event)
+    await applyEvent(event, tx)
+    appended.push(event)
+  }
   await tx.done
-  bus.dispatchEvent(new CustomEvent('boardChanged', { detail: event }))
+  for (const event of appended) {
+    bus.dispatchEvent(new CustomEvent('boardChanged', { detail: event }))
+  }
+}
+
+async function appendEvent(event) {
+  return appendEvents([event])
 }
 
 // Nuclear rebuild: clear projection, replay all events in order.
@@ -1062,17 +1074,14 @@ app.post('/boards', async (c) => {
     title,
     createdAt: Date.now(),
   }, { correlationId })
-  await appendEvent(boardEvent)
-  // Seed default columns for the new board
+  // Seed default columns for the new board — single atomic transaction
   const positions = generateNKeysBetween(null, null, 3)
-  const defaultCols = [
+  const colEvents = [
     { id: crypto.randomUUID(), title: 'Todo', position: positions[0], boardId },
     { id: crypto.randomUUID(), title: 'Doing', position: positions[1], boardId },
     { id: crypto.randomUUID(), title: 'Done', position: positions[2], boardId },
-  ]
-  for (const col of defaultCols) {
-    await appendEvent(createEvent('column.created', col, { correlationId, causationId: boardEvent.id }))
-  }
+  ].map(col => createEvent('column.created', col, { correlationId, causationId: boardEvent.id }))
+  await appendEvents([boardEvent, ...colEvents])
   return c.body(null, 204)
 })
 
