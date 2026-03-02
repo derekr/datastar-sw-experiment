@@ -37,10 +37,11 @@ router.get(routes.home, ({ request }) => {
         eventTarget.addEventListener('increment', handler);
         console.log('[SW] Event listener added');
         
-        const initialHtml = `<div id="counter"><span>${counter}</span></div>`;
-        const initialData = `event: datastar-patch-elements\ndata: elements ${initialHtml}\n\n`;
+        // Initial event patches the app shell content via inner mode
+        const appHtml = `<div id="counter"><span>${counter}</span></div><button data-on:click="@post('${routes.increment.href()}')">Increment</button>`;
+        const initialData = `event: datastar-patch-elements\ndata: mode inner\ndata: selector #app\ndata: elements ${appHtml}\n\n`;
         controller.enqueue(encoder.encode(initialData));
-        console.log('[SW] Initial counter sent:', counter);
+        console.log('[SW] Initial app content sent, counter:', counter);
       },
       cancel() {
         console.log('[SW] SSE connection cancelled');
@@ -65,8 +66,9 @@ router.get(routes.home, ({ request }) => {
       </head>
       <body>
         <h1>Datastar Service Worker Demo</h1>
-        <div id="counter" data-init="@get('${routes.home.href()}')"><span>${counter}</span></div>
-        <button data-on:click="@post('${routes.increment.href()}')">Increment</button>
+        <main id="app" data-init="@get('${routes.home.href()}')">
+          <p>Loading...</p>
+        </main>
       </body>
     </html>
   `, { headers: { 'Content-Type': 'text/html' } });
