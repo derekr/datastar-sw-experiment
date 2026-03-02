@@ -299,6 +299,19 @@ function Shell() {
         >
           <p>Loading...</p>
         </main>
+        <script>{raw(`
+          if (navigator.serviceWorker) {
+            // When a new SW takes control, reload to pick up shell changes (CSS, scripts).
+            // Board content updates are handled automatically via SSE reconnection.
+            navigator.serviceWorker.addEventListener('controllerchange', () => {
+              window.location.reload();
+            });
+            // Periodically check for updates (every 60s in dev, could be longer in prod)
+            navigator.serviceWorker.ready.then(reg => {
+              setInterval(() => reg.update(), 60 * 1000);
+            });
+          }
+        `)}</script>
       </body>
     </html>
   )

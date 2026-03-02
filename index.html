@@ -12,18 +12,21 @@
   
   <script type="module">
     if ('serviceWorker' in navigator) {
-      // If a SW already controls this page, we're good — the SW
-      // intercepted this request and served the app shell.
-      // This script only runs on the *bootstrap* HTML (not the SW shell).
       try {
         const reg = await navigator.serviceWorker.register('/sw.js');
 
+        // Reload when a new SW takes control (update in flight)
+        navigator.serviceWorker.addEventListener('controllerchange', () => {
+          window.location.reload();
+        });
+
         if (navigator.serviceWorker.controller) {
-          // SW already controlling — check for updates
+          // SW already controlling — this bootstrap page shouldn't be
+          // visible (SW serves the shell). Check for updates.
           reg.update();
         } else {
           // First install — wait for activation then reload so the SW
-          // intercepts the next navigation and serves the real app.
+          // intercepts the next navigation and serves the real app shell.
           await navigator.serviceWorker.ready;
           window.location.reload();
         }
