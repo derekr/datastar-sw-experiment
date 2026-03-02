@@ -12,12 +12,21 @@
   
   <script type="module">
     if ('serviceWorker' in navigator) {
+      // If a SW already controls this page, we're good — the SW
+      // intercepted this request and served the app shell.
+      // This script only runs on the *bootstrap* HTML (not the SW shell).
       try {
-        const registration = await navigator.serviceWorker.register('/sw.js');
-        
-        await navigator.serviceWorker.ready;
-        
-        window.location.reload();
+        const reg = await navigator.serviceWorker.register('/sw.js');
+
+        if (navigator.serviceWorker.controller) {
+          // SW already controlling — check for updates
+          reg.update();
+        } else {
+          // First install — wait for activation then reload so the SW
+          // intercepts the next navigation and serves the real app.
+          await navigator.serviceWorker.ready;
+          window.location.reload();
+        }
       } catch (error) {
         console.error('Service Worker registration failed:', error);
       }
