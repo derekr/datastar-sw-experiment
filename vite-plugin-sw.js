@@ -36,9 +36,10 @@ export default function serviceWorkerPlugin() {
     },
     configureServer(server) {
       const swPath = path.resolve(config.root, 'sw.jsx');
+      const kanbanPath = path.resolve(config.root, 'eg-kanban.js');
       server.watcher.on('change', async (filePath) => {
-        if (filePath === swPath) {
-          console.log('[sw-plugin] sw.jsx changed, rebuilding...');
+        if (filePath === swPath || filePath === kanbanPath) {
+          console.log('[sw-plugin] ' + path.basename(filePath) + ' changed, rebuilding...');
           await buildSW();
           server.ws.send({ type: 'full-reload' });
         }

@@ -3,6 +3,7 @@ import { Hono } from 'hono'
 import { streamSSE } from 'hono/streaming'
 import { openDB } from 'idb'
 import { raw } from 'hono/html'
+import egKanbanCode from './eg-kanban.js?raw'
 
 // --- Event Sourcing ---
 
@@ -267,27 +268,11 @@ function dsePatch(selector, jsx, mode = 'outer', { useViewTransition = false } =
 // --- Components ---
 
 function Card({ card }) {
-  const dragstart = [
-    `evt.dataTransfer.effectAllowed = 'move'`,
-    `evt.dataTransfer.setData('cardId', '${card.id}')`,
-    `evt.target.setAttribute('data-dragging', '')`,
-  ].join('; ')
-
-  const dragend = [
-    `evt.target.removeAttribute('data-dragging')`,
-    // Clean up any lingering indicators when drag ends without a drop
-    `document.querySelectorAll('.drop-indicator').forEach(el => el.remove())`,
-    `document.querySelectorAll('.cards-container').forEach(el => { el.removeAttribute('data-drop-index'); el.classList.remove('drag-over') })`,
-  ].join('; ')
-
   return (
     <div
       class="card"
-      draggable="true"
       data-card-id={card.id}
-      style={`view-transition-name: card-${card.id}`}
-      data-on:dragstart={dragstart}
-      data-on:dragend={dragend}
+      style={`view-transition-name: card-${card.id}; touch-action: none`}
     >
       <span>{card.title}</span>
       <button
@@ -305,71 +290,11 @@ function Column({ col, cards, columnCount }) {
     .filter(c => c.columnId === col.id)
     .sort((a, b) => a.position - b.position)
 
-  // --- Card drag-and-drop on .cards-container ---
-
-  const cardDragover = [
-    // Only handle card drags (not column drags)
-    `if (evt.dataTransfer.types.includes('columnid')) return`,
-    `evt.preventDefault()`,
-    `evt.dataTransfer.dropEffect = 'move'`,
-    `const container = evt.currentTarget`,
-    `container.classList.add('drag-over')`,
-    `const cards = Array.from(container.querySelectorAll('.card:not([data-dragging])'))`,
-    `let dropIdx = cards.length`,
-    `for (let i = 0; i < cards.length; i++) { const rect = cards[i].getBoundingClientRect(); if (evt.clientY < rect.top + rect.height / 2) { dropIdx = i; break } }`,
-    `if (container.getAttribute('data-drop-index') === String(dropIdx)) return`,
-    `container.setAttribute('data-drop-index', dropIdx)`,
-    `let indicator = container.querySelector('.drop-indicator')`,
-    `if (!indicator) { indicator = document.createElement('div'); indicator.className = 'drop-indicator'; indicator.setAttribute('data-card-id', 'drop-indicator') }`,
-    `if (cards[dropIdx]) { container.insertBefore(indicator, cards[dropIdx]) } else { container.appendChild(indicator) }`,
-  ].join('; ')
-
-  const cardDragleave = [
-    `if (evt.currentTarget.contains(evt.relatedTarget)) return`,
-    `evt.currentTarget.classList.remove('drag-over')`,
-    `evt.currentTarget.removeAttribute('data-drop-index')`,
-    `const ind = evt.currentTarget.querySelector('.drop-indicator'); if (ind) ind.remove()`,
-  ].join('; ')
-
-  const cardDrop = [
-    // Only handle card drags
-    `if (!evt.dataTransfer.types.includes('cardid')) return`,
-    `evt.preventDefault()`,
-    `const container = evt.currentTarget`,
-    `container.classList.remove('drag-over')`,
-    `const dropIdx = parseInt(container.getAttribute('data-drop-index') || '0', 10)`,
-    `const ind = container.querySelector('.drop-indicator'); if (ind) ind.remove()`,
-    `container.removeAttribute('data-drop-index')`,
-    `const cardId = evt.dataTransfer.getData('cardId')`,
-    `window.__setDropFlip(cardId, evt.clientX, evt.clientY)`,
-    `$dropColumnId = '${col.id}'`,
-    `$dropPosition = dropIdx`,
-    `@put('/cards/' + cardId + '/move')`,
-  ].join('; ')
-
-  // --- Column drag (on .column itself) ---
-
-  const colDragstart = [
-    `evt.dataTransfer.effectAllowed = 'move'`,
-    `evt.dataTransfer.setData('columnId', '${col.id}')`,
-    `evt.currentTarget.setAttribute('data-dragging', '')`,
-  ].join('; ')
-
-  const colDragend = [
-    `evt.currentTarget.removeAttribute('data-dragging')`,
-    `document.querySelectorAll('.col-drop-indicator').forEach(el => el.remove())`,
-    `document.querySelectorAll('.column').forEach(el => el.classList.remove('drag-over'))`,
-    `document.querySelector('.columns')?.removeAttribute('data-drop-index')`,
-  ].join('; ')
-
   return (
     <div
       class="column"
       id={`column-${col.id}`}
-      style={`view-transition-name: col-${col.id}`}
-      draggable="true"
-      data-on:dragstart={colDragstart}
-      data-on:dragend={colDragend}
+      style={`view-transition-name: col-${col.id}; touch-action: none`}
     >
       <div class="column-header">
         <span class="drag-handle">⠿</span>
@@ -382,13 +307,7 @@ function Column({ col, cards, columnCount }) {
           >×</button>
         )}
       </div>
-      <div
-        class="cards-container"
-        data-column-id={col.id}
-        data-on:dragover={cardDragover}
-        data-on:dragleave={cardDragleave}
-        data-on:drop={cardDrop}
-      >
+      <div class="cards-container" data-column-id={col.id}>
         {colCards.length === 0
           ? <p class="empty">No cards yet</p>
           : colCards.map(card => <Card card={card} />)}
@@ -405,51 +324,10 @@ function Column({ col, cards, columnCount }) {
 }
 
 function Board({ columns, cards }) {
-  // --- Column drop zone on .columns ---
-
-  const colDragover = [
-    // Only handle column drags
-    `if (!evt.dataTransfer.types.includes('columnid')) return`,
-    `evt.preventDefault()`,
-    `evt.dataTransfer.dropEffect = 'move'`,
-    `const container = evt.currentTarget`,
-    `const cols = Array.from(container.querySelectorAll('.column:not([data-dragging])'))`,
-    `let dropIdx = cols.length`,
-    `for (let i = 0; i < cols.length; i++) { const rect = cols[i].getBoundingClientRect(); if (evt.clientX < rect.left + rect.width / 2) { dropIdx = i; break } }`,
-    `if (container.getAttribute('data-drop-index') === String(dropIdx)) return`,
-    `container.setAttribute('data-drop-index', dropIdx)`,
-    `let indicator = container.querySelector('.col-drop-indicator')`,
-    `if (!indicator) { indicator = document.createElement('div'); indicator.className = 'col-drop-indicator' }`,
-    `if (cols[dropIdx]) { container.insertBefore(indicator, cols[dropIdx]) } else { container.appendChild(indicator) }`,
-  ].join('; ')
-
-  const colDragleave = [
-    `if (evt.currentTarget.contains(evt.relatedTarget)) return`,
-    `evt.currentTarget.removeAttribute('data-drop-index')`,
-    `const ind = evt.currentTarget.querySelector('.col-drop-indicator'); if (ind) ind.remove()`,
-  ].join('; ')
-
-  const colDrop = [
-    `if (!evt.dataTransfer.types.includes('columnid')) return`,
-    `evt.preventDefault()`,
-    `const container = evt.currentTarget`,
-    `const dropIdx = parseInt(container.getAttribute('data-drop-index') || '0', 10)`,
-    `const ind = container.querySelector('.col-drop-indicator'); if (ind) ind.remove()`,
-    `container.removeAttribute('data-drop-index')`,
-    `const columnId = evt.dataTransfer.getData('columnId')`,
-    `$dropPosition = dropIdx`,
-    `@put('/columns/' + columnId + '/move')`,
-  ].join('; ')
-
   return (
     <div id="board">
       <h1>Kanban Board</h1>
-      <div
-        class="columns"
-        data-on:dragover={colDragover}
-        data-on:dragleave={colDragleave}
-        data-on:drop={colDrop}
-      >
+      <div class="columns">
         {columns.map(col => <Column col={col} cards={cards} columnCount={columns.length} />)}
       </div>
       <form
@@ -472,17 +350,17 @@ body {
   font-family: system-ui, -apple-system, sans-serif;
   background: #0f172a;
   color: #e2e8f0;
-  padding: 24px;
   min-height: 100vh;
 }
 
-h1 { font-size: 1.5rem; font-weight: 600; margin-bottom: 24px; }
+#board { padding-top: 24px; }
+#board h1 { font-size: 1.5rem; font-weight: 600; margin-bottom: 24px; padding: 0 24px; }
 
 .columns {
   display: flex;
   gap: 16px;
   overflow-x: auto;
-  padding-bottom: 16px;
+  padding: 0 24px 16px 24px;
   align-items: flex-start;
 }
 
@@ -493,11 +371,9 @@ h1 { font-size: 1.5rem; font-weight: 600; margin-bottom: 24px; }
   min-width: 300px;
   max-width: 300px;
   flex-shrink: 0;
-  cursor: grab;
 }
 
-.column:active { cursor: grabbing; }
-.column[data-dragging] { opacity: 0.3; transform: scale(0.97); }
+.column[data-kanban-dragging] { opacity: 0.5; }
 
 .col-drop-indicator {
   width: 3px;
@@ -568,10 +444,7 @@ h1 { font-size: 1.5rem; font-weight: 600; margin-bottom: 24px; }
   transition: background 0.15s, box-shadow 0.15s;
 }
 
-.cards-container.drag-over {
-  background: rgba(99, 102, 241, 0.08);
-  box-shadow: inset 0 0 0 2px rgba(99, 102, 241, 0.3);
-}
+
 
 .empty {
   color: #475569;
@@ -589,12 +462,12 @@ h1 { font-size: 1.5rem; font-weight: 600; margin-bottom: 24px; }
   justify-content: space-between;
   align-items: center;
   cursor: grab;
-  transition: opacity 0.15s, transform 0.15s, box-shadow 0.15s;
+  transition: border-color 0.15s;
 }
 
 .card:hover { border-color: #475569; }
-.card:active { cursor: grabbing; }
-.card[data-dragging] { opacity: 0.3; transform: scale(0.97); }
+.card[data-kanban-dragging] { opacity: 0.5; }
+.card[data-kanban-dropping] { z-index: 10; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3); }
 .card span { font-size: 0.9rem; word-break: break-word; }
 
 .drop-indicator {
@@ -658,6 +531,7 @@ h1 { font-size: 1.5rem; font-weight: 600; margin-bottom: 24px; }
   display: flex;
   gap: 8px;
   margin-top: 16px;
+  padding: 0 24px;
 }
 
 .add-col-form input {
@@ -695,10 +569,8 @@ h1 { font-size: 1.5rem; font-weight: 600; margin-bottom: 24px; }
 ::view-transition-old(*) { animation: none; opacity: 0; }
 ::view-transition-new(*) { animation: none; }
 
-.card[data-dropping] {
-  z-index: 10;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
-}
+/* body cursor during drag (set by eg-kanban) */
+body[style*="cursor: grabbing"] * { cursor: grabbing !important; }
 `
 
 function Shell() {
@@ -713,13 +585,12 @@ function Shell() {
           type="module"
           src="https://cdn.jsdelivr.net/gh/starfederation/datastar@1.0.0-RC.8/bundles/datastar.js"
         ></script>
+        <script src="/eg-kanban.js"></script>
       </head>
       <body>
         <main
           id="app"
           data-init="@get('/', { retry: 'always', retryMaxCount: 1000 })"
-          data-signals:dropColumnId="''"
-          data-signals:dropPosition="0"
         >
           <p>Loading...</p>
         </main>
@@ -734,53 +605,37 @@ function Shell() {
           }
           navigator.storage?.persist?.();
 
-          // FLIP animation for the dropped card.
-          // Uses MutationObserver to:
-          //   1. Keep view-transition-name: none through the morph (so VT animates
-          //      other cards but not this one — prevents snap-back-from-old-position)
-          //   2. Detect when the morph moves the card, then FLIP from cursor → new pos
-          // MO fires as microtask after morph but before VT captures new state.
-          window.__setDropFlip = function(cardId, cursorX, cursorY) {
-            var card = document.querySelector('[data-card-id="' + cardId + '"]');
-            if (!card) return;
-            card.style.viewTransitionName = 'none';
-            var origRect = card.getBoundingClientRect();
-            var done = false;
+          // Initialize eg-kanban when #board appears (after first SSE morph)
+          var kanbanCleanup = null;
+          var boardObserver = new MutationObserver(function() {
+            var board = document.getElementById('board');
+            if (board && !kanbanCleanup && window.initKanban) {
+              kanbanCleanup = window.initKanban(board);
+            }
+          });
+          boardObserver.observe(document.getElementById('app'), { childList: true, subtree: true });
 
-            var mo = new MutationObserver(function(mutations) {
-              if (done) return;
-              var el = document.querySelector('[data-card-id="' + cardId + '"]');
-              if (!el) { done = true; mo.disconnect(); return; }
-              // Keep this card out of view transitions (morph may restore VTN)
-              if (el.style.viewTransitionName !== 'none') el.style.viewTransitionName = 'none';
-              // Wait for card to actually move (morph landed)
-              var rect = el.getBoundingClientRect();
-              if (Math.abs(rect.left - origRect.left) < 1 && Math.abs(rect.top - origRect.top) < 1) return;
-              // Card moved! Run FLIP from cursor position to new DOM position
-              done = true;
-              mo.disconnect();
-              var dx = cursorX - (rect.left + rect.width / 2);
-              var dy = cursorY - (rect.top + rect.height / 2);
-              if (Math.abs(dx) < 2 && Math.abs(dy) < 2) {
-                el.style.viewTransitionName = '';
-                return;
-              }
-              el.setAttribute('data-dropping', '');
-              el.animate(
-                [{ transform: 'translate(' + dx + 'px,' + dy + 'px)' }, { transform: 'none' }],
-                { duration: 200, easing: 'cubic-bezier(0.2, 0, 0, 1)' }
-              ).onfinish = function() {
-                el.removeAttribute('data-dropping');
-                el.style.viewTransitionName = '';
-              };
+          // Card drop → PUT to SW
+          document.getElementById('app').addEventListener('kanban-card-drag-end', function(e) {
+            var d = e.detail;
+            if (!d.columnId || !d.cardId) return;
+            fetch('/cards/' + d.cardId + '/move', {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ dropColumnId: d.columnId, dropPosition: d.position })
             });
+          });
 
-            mo.observe(document.getElementById('app'), { childList: true, subtree: true });
-            // Timeout: clean up if morph never arrives (e.g. drop at same position)
-            setTimeout(function() {
-              if (!done) { done = true; mo.disconnect(); card.style.viewTransitionName = ''; }
-            }, 500);
-          };
+          // Column drop → PUT to SW
+          document.getElementById('app').addEventListener('kanban-column-drag-end', function(e) {
+            var d = e.detail;
+            if (!d.columnId) return;
+            fetch('/columns/' + d.columnId + '/move', {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ dropPosition: d.position })
+            });
+          });
         `)}</script>
       </body>
     </html>
@@ -961,6 +816,11 @@ function EventsPage() {
 // --- Hono app ---
 
 const app = new Hono()
+
+// Serve eg-kanban.js (imported as raw string at build time)
+app.get('/eg-kanban.js', (c) => {
+  return c.body(egKanbanCode, 200, { 'Content-Type': 'application/javascript', 'Cache-Control': 'no-cache' })
+})
 
 // Query: SSE stream pushes full board state on every change
 app.get('/', async (c) => {
