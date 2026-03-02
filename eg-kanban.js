@@ -167,6 +167,9 @@
       document.querySelectorAll(sel).forEach(function (s) {
         s.style.viewTransitionName = ''
       })
+      // Re-enable view-transition-name on all items (CSS !important lifts)
+      var board = document.getElementById('board')
+      if (board) board.removeAttribute('data-kanban-active')
     }
 
     // Force-clean all drag inline styles from the element (in case Idiomorph
@@ -361,6 +364,9 @@
         el.style.pointerEvents = 'none'
       }
       document.body.style.cursor = 'grabbing'
+      // Suppress view-transition-name on all items so no stacking contexts
+      // trap the position:fixed dragged element behind siblings.
+      boardEl.setAttribute('data-kanban-active', '')
 
       // Start camera
       var sc = getScrollContainer()
@@ -436,7 +442,6 @@
           var beforeMap = new Map()
           srcChildren.forEach(function (c) { beforeMap.set(c, c.getBoundingClientRect()) })
           dstChildren.forEach(function (c) { beforeMap.set(c, c.getBoundingClientRect()) })
-
           positionGhost(cardIndicator, container, position, '.card:not([data-kanban-dragging])')
 
           // Animate source container children
@@ -496,6 +501,7 @@
       el.style.zIndex = ''
       el.style.pointerEvents = ''
       document.body.style.cursor = ''
+      boardEl.removeAttribute('data-kanban-active')
 
       if (camera) { camera.stop(); camera = null }
       removeGhost(cardIndicator); cardIndicator = null

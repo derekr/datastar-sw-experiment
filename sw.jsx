@@ -471,6 +471,10 @@ body {
   box-sizing: border-box;
 }
 
+/* During drag, suppress VTN so no stacking contexts trap the fixed-position element */
+#board[data-kanban-active] .column,
+#board[data-kanban-active] .card { view-transition-name: none !important; }
+
 .delete-btn {
   background: none;
   border: none;
