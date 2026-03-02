@@ -8,10 +8,14 @@ export default function serviceWorkerPlugin() {
   async function buildSW() {
     const result = await build({
       configFile: false,
+      esbuild: {
+        jsx: 'automatic',
+        jsxImportSource: 'hono/jsx',
+      },
       build: {
         write: false,
         rollupOptions: {
-          input: path.resolve(config.root, 'sw.js'),
+          input: path.resolve(config.root, 'sw.jsx'),
           output: { format: 'iife' },
         },
       },
@@ -31,19 +35,11 @@ export default function serviceWorkerPlugin() {
       }
     },
     configureServer(server) {
-      // Rebuild sw.js on any file change
-      server.watcher.on('change', async (filePath) => {
-        if (filePath.endsWith('sw.js') || filePath.includes('node_modules')) return;
-        // Don't rebuild for non-SW related changes handled by Vite HMR
-      });
-
-      // Watch sw.js specifically and rebuild
-      const swPath = path.resolve(config.root, 'sw.js');
+      const swPath = path.resolve(config.root, 'sw.jsx');
       server.watcher.on('change', async (filePath) => {
         if (filePath === swPath) {
-          console.log('[sw-plugin] sw.js changed, rebuilding...');
+          console.log('[sw-plugin] sw.jsx changed, rebuilding...');
           await buildSW();
-          // Notify connected clients to update the SW
           server.ws.send({ type: 'full-reload' });
         }
       });

@@ -7,7 +7,7 @@
     "build": "vite build"
   },
   "dependencies": {
-    "@remix-run/fetch-router": "^0.17.0",
+    "hono": "^4.12.3",
     "idb": "^8.0.3"
   },
   "devDependencies": {
