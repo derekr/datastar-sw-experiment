@@ -35,6 +35,9 @@ function upcast(event) {
   return e
 }
 
+// Stable device identifier, resolved during initialize().
+let actorId = null
+
 function createEvent(type, data, { correlationId, causationId } = {}) {
   return {
     id: crypto.randomUUID(),
@@ -45,6 +48,7 @@ function createEvent(type, data, { correlationId, causationId } = {}) {
     synced: false,
     correlationId: correlationId || crypto.randomUUID(),
     causationId: causationId || null,
+    actorId,
   }
 }
 
@@ -278,6 +282,15 @@ let initialized = false
 async function initialize() {
   if (initialized) return
   initialized = true
+  // Resolve stable device identity
+  const db = await dbPromise
+  const stored = await db.get('meta', 'actorId')
+  if (stored) {
+    actorId = stored.value
+  } else {
+    actorId = crypto.randomUUID()
+    await db.put('meta', { key: 'actorId', value: actorId })
+  }
   await migrateFromV1()
   await seed()
   await migrateToBoards()
