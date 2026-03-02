@@ -9,7 +9,9 @@ import egKanbanCode from './eg-kanban.js?raw'
 
 // Event schema versions. Bump when event shape changes.
 const EVENT_VERSIONS = {
-  'column.created': 1,
+  'board.created': 1,
+  'board.deleted': 1,
+  'column.created': 2,
   'column.deleted': 1,
   'column.moved': 1,
   'card.created': 1,
@@ -18,9 +20,12 @@ const EVENT_VERSIONS = {
 }
 
 // Upcasters transform old event versions to current during replay.
-// When a schema changes, bump the version above and add a transform here:
-//   'card.created': { 1: (e) => ({ ...e, v: 2, data: { ...e.data, description: '' } }) }
-const upcasters = {}
+// When a schema changes, bump the version above and add a transform here.
+const upcasters = {
+  'column.created': {
+    1: (e) => ({ ...e, v: 2, data: { ...e.data, boardId: e.data.boardId || 'default' } }),
+  },
+}
 
 function upcast(event) {
   let e = { ...event }
@@ -45,6 +50,22 @@ function createEvent(type, data) {
 async function applyEvent(event, tx) {
   const { type, data } = upcast(event)
   switch (type) {
+    case 'board.created':
+      await tx.objectStore('boards').put(data)
+      break
+
+    case 'board.deleted': {
+      await tx.objectStore('boards').delete(data.id)
+      // Delete all columns and cards belonging to this board
+      const cols = await tx.objectStore('columns').index('byBoard').getAll(data.id)
+      for (const col of cols) {
+        const colCards = await tx.objectStore('cards').index('byColumn').getAll(col.id)
+        for (const card of colCards) await tx.objectStore('cards').delete(card.id)
+        await tx.objectStore('columns').delete(col.id)
+      }
+      break
+    }
+
     case 'column.created':
       await tx.objectStore('columns').put(data)
       break
@@ -123,8 +144,8 @@ async function applyEvent(event, tx) {
 
 // --- Database ---
 
-const dbPromise = openDB('kanban', 2, {
-  upgrade(db, oldVersion) {
+const dbPromise = openDB('kanban', 3, {
+  upgrade(db, oldVersion, _newVersion, tx) {
     if (oldVersion < 1) {
       db.createObjectStore('columns', { keyPath: 'id' })
       const cards = db.createObjectStore('cards', { keyPath: 'id' })
@@ -135,6 +156,14 @@ const dbPromise = openDB('kanban', 2, {
       events.createIndex('byId', 'id', { unique: true })
       events.createIndex('bySynced', 'synced')
       db.createObjectStore('meta', { keyPath: 'key' })
+    }
+    if (oldVersion < 3) {
+      db.createObjectStore('boards', { keyPath: 'id' })
+      // Add byBoard index to columns (need to recreate if store already exists)
+      const colStore = tx.objectStore('columns')
+      if (!colStore.indexNames.contains('byBoard')) {
+        colStore.createIndex('byBoard', 'boardId')
+      }
     }
   },
 })
@@ -147,22 +176,25 @@ const bus = new EventTarget()
 
 // Append event to log + apply to projection in a single transaction.
 // Idempotent: skips events already in the log (by event ID).
+const ALL_STORES = ['events', 'boards', 'columns', 'cards']
+
 async function appendEvent(event) {
   const db = await dbPromise
-  const tx = db.transaction(['events', 'columns', 'cards'], 'readwrite')
+  const tx = db.transaction(ALL_STORES, 'readwrite')
   const existing = await tx.objectStore('events').index('byId').get(event.id)
   if (existing) { await tx.done; return }
   await tx.objectStore('events').put(event)
   await applyEvent(event, tx)
   await tx.done
-  bus.dispatchEvent(new Event('boardChanged'))
+  bus.dispatchEvent(new CustomEvent('boardChanged', { detail: event }))
 }
 
 // Nuclear rebuild: clear projection, replay all events in order.
 // Use when projection is suspected to be out of sync with the event log.
 async function rebuildProjection() {
   const db = await dbPromise
-  const tx = db.transaction(['events', 'columns', 'cards'], 'readwrite')
+  const tx = db.transaction(ALL_STORES, 'readwrite')
+  await tx.objectStore('boards').clear()
   await tx.objectStore('columns').clear()
   await tx.objectStore('cards').clear()
   const allEvents = await tx.objectStore('events').getAll()
@@ -170,7 +202,7 @@ async function rebuildProjection() {
     await applyEvent(event, tx)
   }
   await tx.done
-  bus.dispatchEvent(new Event('boardChanged'))
+  bus.dispatchEvent(new CustomEvent('boardChanged', { detail: null }))
 }
 
 // --- Initialization ---
@@ -194,23 +226,38 @@ async function migrateFromV1() {
   await tx.done
 }
 
-// Seed default columns on fresh install (no events, no existing data).
+// Migrate pre-boards data: ensure all columns have a boardId and a board exists.
+async function migrateToBoards() {
+  const db = await dbPromise
+  const boards = await db.getAll('boards')
+  if (boards.length > 0) return // already migrated
+  const columns = await db.getAll('columns')
+  if (columns.length === 0) return // nothing to migrate
+  // Create a default board and tag existing columns
+  const tx = db.transaction(ALL_STORES, 'readwrite')
+  const boardEvent = createEvent('board.created', {
+    id: 'default',
+    title: 'My Board',
+    createdAt: Date.now(),
+  })
+  await tx.objectStore('events').put(boardEvent)
+  await applyEvent(boardEvent, tx)
+  // Tag columns with boardId
+  for (const col of columns) {
+    if (!col.boardId) {
+      await tx.objectStore('columns').put({ ...col, boardId: 'default' })
+    }
+  }
+  await tx.done
+}
+
+// Seed: no-op if any boards exist. Fresh install creates nothing — user creates their first board.
 async function seed() {
+  // Legacy seed for pre-boards installs (no events, no columns = fresh)
   const db = await dbPromise
   if ((await db.count('events')) > 0) return
   if ((await db.count('columns')) > 0) return
-  const cols = [
-    { id: 'todo', title: 'Todo', position: 0 },
-    { id: 'doing', title: 'Doing', position: 1 },
-    { id: 'done', title: 'Done', position: 2 },
-  ]
-  const tx = db.transaction(['events', 'columns', 'cards'], 'readwrite')
-  for (const col of cols) {
-    const event = createEvent('column.created', col)
-    await tx.objectStore('events').put(event)
-    await applyEvent(event, tx)
-  }
-  await tx.done
+  // Fresh install — no default data, user creates first board from /
 }
 
 let initialized = false
@@ -219,6 +266,7 @@ async function initialize() {
   initialized = true
   await migrateFromV1()
   await seed()
+  await migrateToBoards()
 }
 
 // --- Sync (S2 stub — activate when credentials are configured) ---
@@ -241,11 +289,29 @@ async function pullEvents() {
 
 // --- Queries ---
 
-async function getBoard() {
+async function getBoards() {
   const db = await dbPromise
-  const columns = (await db.getAll('columns')).sort((a, b) => a.position - b.position)
+  const boards = await db.getAll('boards')
+  // Attach column/card counts
+  const columns = await db.getAll('columns')
   const cards = await db.getAll('cards')
-  return { columns, cards }
+  return boards.map(b => ({
+    ...b,
+    columnCount: columns.filter(c => c.boardId === b.id).length,
+    cardCount: cards.filter(c => columns.some(col => col.boardId === b.id && col.id === c.columnId)).length,
+  })).sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0))
+}
+
+async function getBoard(boardId) {
+  const db = await dbPromise
+  const board = await db.get('boards', boardId)
+  if (!board) return null
+  const columns = (await db.getAllFromIndex('columns', 'byBoard', boardId))
+    .sort((a, b) => a.position - b.position)
+  const cards = await db.getAll('cards')
+  // Only include cards belonging to this board's columns
+  const colIds = new Set(columns.map(c => c.id))
+  return { board, columns, cards: cards.filter(c => colIds.has(c.columnId)) }
 }
 
 // --- SSE helpers ---
@@ -322,20 +388,60 @@ function Column({ col, cards, columnCount }) {
   )
 }
 
-function Board({ columns, cards }) {
+function Board({ board, columns, cards }) {
   return (
     <div id="board">
-      <h1>Kanban Board</h1>
+      <div class="board-header">
+        <a href="/" class="back-link" data-on:click__prevent="window.location.href = '/'">← Boards</a>
+        <h1>{board.title}</h1>
+      </div>
       <div class="columns">
         {columns.map(col => <Column col={col} cards={cards} columnCount={columns.length} />)}
       </div>
       <form
         class="add-col-form"
-        data-on:submit__prevent__viewtransition="@post('/columns', {contentType: 'form'}); evt.target.reset()"
+        data-on:submit__prevent__viewtransition={`@post('/boards/${board.id}/columns', {contentType: 'form'}); evt.target.reset()`}
       >
         <input name="title" type="text" placeholder="Add a column..." autocomplete="off" />
         <button type="submit">+ Column</button>
       </form>
+    </div>
+  )
+}
+
+function BoardCard({ board }) {
+  return (
+    <div class="board-card" style={`view-transition-name: board-${board.id}`}>
+      <a class="board-card-link" href={`/boards/${board.id}`}>
+        <h2>{board.title}</h2>
+        <div class="board-meta">
+          <span>{board.columnCount} {board.columnCount === 1 ? 'column' : 'columns'}</span>
+          <span>·</span>
+          <span>{board.cardCount} {board.cardCount === 1 ? 'card' : 'cards'}</span>
+        </div>
+      </a>
+      <button
+        class="board-delete-btn"
+        data-on:click__prevent__viewtransition={`@delete('/boards/${board.id}')`}
+      >×</button>
+    </div>
+  )
+}
+
+function BoardsList({ boards }) {
+  return (
+    <div id="boards-list">
+      <h1>Boards</h1>
+      <div class="boards-grid">
+        {boards.map(b => <BoardCard board={b} />)}
+        <form
+          class="board-new"
+          data-on:submit__prevent="@post('/boards', {contentType: 'form'})"
+        >
+          <input name="title" type="text" placeholder="New board name..." autocomplete="off" />
+          <button type="submit">+ Board</button>
+        </form>
+      </div>
     </div>
   )
 }
@@ -352,8 +458,98 @@ body {
   min-height: 100vh;
 }
 
-#board { padding-top: 24px; }
-#board h1 { font-size: 1.5rem; font-weight: 600; margin-bottom: 24px; padding: 0 24px; }
+/* ── Boards list ─────────────────────────────────────── */
+
+#boards-list { padding: 24px; max-width: 800px; margin: 0 auto; }
+#boards-list h1 { font-size: 1.5rem; font-weight: 600; margin-bottom: 24px; }
+
+.boards-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 16px;
+}
+
+.board-card {
+  background: #1e293b;
+  border: 1px solid #334155;
+  border-radius: 12px;
+  position: relative;
+  transition: border-color 0.15s;
+}
+.board-card:hover { border-color: #6366f1; }
+.board-card-link {
+  display: block;
+  padding: 20px;
+  text-decoration: none;
+  color: inherit;
+  cursor: pointer;
+}
+.board-card h2 { font-size: 1rem; font-weight: 600; margin-bottom: 8px; }
+.board-meta { font-size: 0.8rem; color: #64748b; display: flex; gap: 6px; }
+
+.board-delete-btn {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  background: none;
+  border: none;
+  color: #475569;
+  cursor: pointer;
+  font-size: 1.1rem;
+  line-height: 1;
+  padding: 2px 4px;
+}
+.board-delete-btn:hover { color: #ef4444; }
+
+.board-new {
+  background: transparent;
+  border: 2px dashed #334155;
+  border-radius: 12px;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.board-new input {
+  background: #0f172a;
+  border: 1px solid #334155;
+  border-radius: 6px;
+  padding: 8px 10px;
+  color: #e2e8f0;
+  font-size: 0.85rem;
+}
+.board-new input::placeholder { color: #475569; }
+.board-new input:focus { outline: none; border-color: #6366f1; }
+.board-new button {
+  background: #6366f1;
+  border: none;
+  border-radius: 6px;
+  color: #fff;
+  padding: 8px 14px;
+  cursor: pointer;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+.board-new button:hover { background: #4f46e5; }
+
+/* ── Board detail ───────────────────────────────────── */
+
+.board-header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+.board-header h1 { font-size: 1.5rem; font-weight: 600; }
+.back-link {
+  color: #6366f1;
+  text-decoration: none;
+  font-size: 0.85rem;
+  white-space: nowrap;
+}
+.back-link:hover { text-decoration: underline; }
+
+#board { padding: 24px; }
 
 .columns {
   display: flex;
@@ -557,6 +753,9 @@ body {
 
 .add-col-form button:hover { background: #475569; }
 
+/* MPA cross-document view transitions */
+@view-transition { navigation: auto; }
+
 ::view-transition-group(*) {
   animation-duration: 200ms;
   animation-timing-function: cubic-bezier(0.2, 0, 0, 1);
@@ -568,26 +767,28 @@ body {
 body[style*="cursor: grabbing"] * { cursor: grabbing !important; }
 `
 
-function Shell() {
+function Shell({ path, children }) {
+  const sseUrl = path || '/'
+  const isBoardPage = sseUrl.startsWith('/boards/')
   return (
     <html lang="en">
       <head>
         <meta charset="UTF-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-        <title>Kanban Board</title>
+        <title>Kanban</title>
         <style>{raw(CSS)}</style>
         <script
           type="module"
           src="https://cdn.jsdelivr.net/gh/starfederation/datastar@1.0.0-RC.8/bundles/datastar.js"
         ></script>
-        <script src="/eg-kanban.js"></script>
+        {isBoardPage && <script src="/eg-kanban.js"></script>}
       </head>
       <body>
         <main
           id="app"
-          data-init="@get('/', { retry: 'always', retryMaxCount: 1000 })"
+          data-init={`@get('${sseUrl}', { retry: 'always', retryMaxCount: 1000 })`}
         >
-          <p>Loading...</p>
+          {children || <p>Loading...</p>}
         </main>
         <script>{raw(`
           if (navigator.serviceWorker) {
@@ -606,6 +807,11 @@ function Shell() {
             var board = document.getElementById('board');
             if (board && !kanbanCleanup && window.initKanban) {
               kanbanCleanup = window.initKanban(board);
+            }
+            // Clean up if board is removed (navigated away)
+            if (!board && kanbanCleanup) {
+              kanbanCleanup();
+              kanbanCleanup = null;
             }
           });
           boardObserver.observe(document.getElementById('app'), { childList: true, subtree: true });
@@ -817,32 +1023,125 @@ app.get('/eg-kanban.js', (c) => {
   return c.body(egKanbanCode, 200, { 'Content-Type': 'application/javascript', 'Cache-Control': 'no-cache' })
 })
 
-// Query: SSE stream pushes full board state on every change
+// ── Boards list (index) ──────────────────────────────────────────────────────
+
 app.get('/', async (c) => {
   await initialize()
 
   if (c.req.header('Datastar-Request') === 'true') {
     return streamSSE(c, async (stream) => {
+      const push = async (selector, mode, opts) => {
+        const boards = await getBoards()
+        await stream.writeSSE(dsePatch(selector, <BoardsList boards={boards} />, mode, opts))
+      }
+
+      const handler = (e) => {
+        const evt = e.detail
+        if (evt?.type === 'board.created') {
+          // Redirect to the newly created board instead of morphing the list
+          stream.writeSSE({
+            event: 'datastar-patch-elements',
+            data: `mode append\nselector body\nelements <script>window.location.href = '/boards/${evt.data.id}'</script>`,
+          })
+          return
+        }
+        if (evt?.type === 'board.deleted') {
+          push('#boards-list', 'outer', { useViewTransition: true })
+        }
+        // Other events (column/card changes) — no real-time update needed
+      }
+      bus.addEventListener('boardChanged', handler)
+      stream.onAbort(() => bus.removeEventListener('boardChanged', handler))
+
+      await push('#app', 'inner')
+      while (!stream.closed) { await stream.sleep(30000) }
+    })
+  }
+
+  const boards = await getBoards()
+  return c.html('<!DOCTYPE html>' + (<Shell path="/"><BoardsList boards={boards} /></Shell>).toString())
+})
+
+// Command: create board
+app.post('/boards', async (c) => {
+  const body = await c.req.parseBody()
+  const title = String(body.title || '').trim()
+  if (!title) return c.body(null, 204)
+
+  const boardId = crypto.randomUUID()
+  await appendEvent(createEvent('board.created', {
+    id: boardId,
+    title,
+    createdAt: Date.now(),
+  }))
+  // Seed default columns for the new board
+  const defaultCols = [
+    { id: crypto.randomUUID(), title: 'Todo', position: 0, boardId },
+    { id: crypto.randomUUID(), title: 'Doing', position: 1, boardId },
+    { id: crypto.randomUUID(), title: 'Done', position: 2, boardId },
+  ]
+  for (const col of defaultCols) {
+    await appendEvent(createEvent('column.created', col))
+  }
+  return c.body(null, 204)
+})
+
+// Command: delete board (and all its columns/cards)
+app.delete('/boards/:boardId', async (c) => {
+  await appendEvent(createEvent('board.deleted', {
+    id: c.req.param('boardId'),
+  }))
+  return c.body(null, 204)
+})
+
+// ── Board detail ─────────────────────────────────────────────────────────────
+
+app.get('/boards/:boardId', async (c) => {
+  await initialize()
+  const boardId = c.req.param('boardId')
+
+  if (c.req.header('Datastar-Request') === 'true') {
+    return streamSSE(c, async (stream) => {
       const pushBoard = async (selector, mode, opts) => {
-        const { columns, cards } = await getBoard()
-        await stream.writeSSE(dsePatch(selector, <Board columns={columns} cards={cards} />, mode, opts))
+        const data = await getBoard(boardId)
+        if (!data) return
+        await stream.writeSSE(dsePatch(selector, <Board board={data.board} columns={data.columns} cards={data.cards} />, mode, opts))
       }
 
       const handler = () => pushBoard('#board', 'outer', { useViewTransition: true })
       bus.addEventListener('boardChanged', handler)
       stream.onAbort(() => bus.removeEventListener('boardChanged', handler))
 
-      // Initial render — patch into app shell (no view transition)
       await pushBoard('#app', 'inner')
-
-      // Keep stream open until client disconnects
-      while (!stream.closed) {
-        await stream.sleep(30000)
-      }
+      while (!stream.closed) { await stream.sleep(30000) }
     })
   }
 
-  return c.html('<!DOCTYPE html>' + (<Shell />).toString())
+  const data = await getBoard(boardId)
+  return c.html('<!DOCTYPE html>' + (
+    <Shell path={`/boards/${boardId}`}>
+      {data ? <Board board={data.board} columns={data.columns} cards={data.cards} /> : <p>Board not found</p>}
+    </Shell>
+  ).toString())
+})
+
+// Command: create column (board-scoped)
+app.post('/boards/:boardId/columns', async (c) => {
+  const boardId = c.req.param('boardId')
+  const body = await c.req.parseBody()
+  const title = String(body.title || '').trim()
+  if (!title) return c.body(null, 204)
+
+  const db = await dbPromise
+  const columns = await db.getAllFromIndex('columns', 'byBoard', boardId)
+
+  await appendEvent(createEvent('column.created', {
+    id: crypto.randomUUID(),
+    title,
+    boardId,
+    position: columns.length,
+  }))
+  return c.body(null, 204)
 })
 
 // Command: create card
@@ -880,23 +1179,6 @@ app.put('/cards/:cardId/move', async (c) => {
     id: cardId,
     columnId: targetColumnId,
     position: targetPosition,
-  }))
-  return c.body(null, 204)
-})
-
-// Command: create column
-app.post('/columns', async (c) => {
-  const body = await c.req.parseBody()
-  const title = String(body.title || '').trim()
-  if (!title) return c.body(null, 204)
-
-  const db = await dbPromise
-  const columns = await db.getAll('columns')
-
-  await appendEvent(createEvent('column.created', {
-    id: crypto.randomUUID(),
-    title,
-    position: columns.length,
   }))
   return c.body(null, 204)
 })

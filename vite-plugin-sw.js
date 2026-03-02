@@ -41,7 +41,11 @@ export default function serviceWorkerPlugin() {
         if (filePath === swPath || filePath === kanbanPath) {
           console.log('[sw-plugin] ' + path.basename(filePath) + ' changed, rebuilding...');
           await buildSW();
-          server.ws.send({ type: 'full-reload' });
+          // Don't full-reload — that fires before the new SW activates,
+          // causing a flash of old Shell. Instead, tell the page to
+          // trigger reg.update() so the SW lifecycle handles the reload
+          // via controllerchange.
+          server.ws.send({ type: 'custom', event: 'sw-updated' });
         }
       });
 

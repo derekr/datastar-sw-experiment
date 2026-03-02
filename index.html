@@ -15,20 +15,24 @@
       try {
         const reg = await navigator.serviceWorker.register('/sw.js');
 
-        // Reload when a new SW takes control (update in flight)
-        navigator.serviceWorker.addEventListener('controllerchange', () => {
+        // Single reload gate — prevents double-reload from both
+        // the ready/controllerchange paths firing in sequence.
+        let reloading = false;
+        function reloadOnce() {
+          if (reloading) return;
+          reloading = true;
           window.location.reload();
-        });
+        }
 
-        if (navigator.serviceWorker.controller) {
-          // SW already controlling — this bootstrap page shouldn't be
-          // visible (SW serves the shell). Check for updates.
-          reg.update();
-        } else {
-          // First install — wait for activation then reload so the SW
-          // intercepts the next navigation and serves the real app shell.
+        // Reload when a new SW takes control
+        navigator.serviceWorker.addEventListener('controllerchange', reloadOnce);
+
+        if (!navigator.serviceWorker.controller) {
+          // First install — wait for the SW to claim this client, then reload.
+          // controllerchange fires when claim() runs, triggering reloadOnce.
+          // Fallback: if controllerchange doesn't fire within 3s, force reload.
           await navigator.serviceWorker.ready;
-          window.location.reload();
+          setTimeout(reloadOnce, 3000);
         }
       } catch (error) {
         console.error('Service Worker registration failed:', error);
