@@ -3,6 +3,7 @@ import { Hono } from 'hono'
 import { streamSSE } from 'hono/streaming'
 import { openDB } from 'idb'
 import { raw } from 'hono/html'
+import { generateKeyBetween, generateNKeysBetween } from 'fractional-indexing'
 import egKanbanCode from './eg-kanban.js?raw'
 
 // --- Event Sourcing ---
@@ -71,18 +72,13 @@ async function applyEvent(event, tx) {
       break
 
     case 'column.deleted': {
-      // Delete column and all its cards
+      // Delete column and all its cards (no reindexing — fractional keys tolerate gaps)
       const colStore = tx.objectStore('columns')
       const cardStore = tx.objectStore('cards')
       await colStore.delete(data.id)
       const allCards = await cardStore.getAll()
       for (const card of allCards.filter(c => c.columnId === data.id)) {
         await cardStore.delete(card.id)
-      }
-      // Reposition remaining columns
-      const remaining = (await colStore.getAll()).sort((a, b) => a.position - b.position)
-      for (let i = 0; i < remaining.length; i++) {
-        await colStore.put({ ...remaining[i], position: i })
       }
       break
     }
@@ -91,13 +87,7 @@ async function applyEvent(event, tx) {
       const colStore = tx.objectStore('columns')
       const col = await colStore.get(data.id)
       if (!col) break
-      const allCols = (await colStore.getAll())
-        .filter(c => c.id !== data.id)
-        .sort((a, b) => a.position - b.position)
-      allCols.splice(data.position, 0, { ...col })
-      for (let i = 0; i < allCols.length; i++) {
-        await colStore.put({ ...allCols[i], position: i })
-      }
+      await colStore.put({ ...col, position: data.position })
       break
     }
 
@@ -109,30 +99,7 @@ async function applyEvent(event, tx) {
       const store = tx.objectStore('cards')
       const card = await store.get(data.id)
       if (!card) break
-
-      const sourceColumnId = card.columnId
-      const allCards = await store.getAll()
-
-      const sourceCards = allCards
-        .filter(c => c.columnId === sourceColumnId && c.id !== data.id)
-        .sort((a, b) => a.position - b.position)
-
-      const targetCards = sourceColumnId === data.columnId
-        ? [...sourceCards]
-        : allCards
-            .filter(c => c.columnId === data.columnId && c.id !== data.id)
-            .sort((a, b) => a.position - b.position)
-
-      targetCards.splice(data.position, 0, { ...card, columnId: data.columnId })
-
-      if (sourceColumnId !== data.columnId) {
-        for (let i = 0; i < sourceCards.length; i++) {
-          await store.put({ ...sourceCards[i], position: i })
-        }
-      }
-      for (let i = 0; i < targetCards.length; i++) {
-        await store.put({ ...targetCards[i], columnId: data.columnId, position: i })
-      }
+      await store.put({ ...card, columnId: data.columnId, position: data.position })
       break
     }
 
@@ -217,10 +184,10 @@ async function migrateFromV1() {
   if (columns.length === 0) return
   const cards = await db.getAll('cards')
   const tx = db.transaction('events', 'readwrite')
-  for (const col of columns.sort((a, b) => a.position - b.position)) {
+  for (const col of columns.sort(cmpPosition)) {
     await tx.store.put(createEvent('column.created', col))
   }
-  for (const card of cards.sort((a, b) => a.position - b.position)) {
+  for (const card of cards.sort(cmpPosition)) {
     await tx.store.put(createEvent('card.created', card))
   }
   await tx.done
@@ -307,11 +274,26 @@ async function getBoard(boardId) {
   const board = await db.get('boards', boardId)
   if (!board) return null
   const columns = (await db.getAllFromIndex('columns', 'byBoard', boardId))
-    .sort((a, b) => a.position - b.position)
+    .sort(cmpPosition)
   const cards = await db.getAll('cards')
   // Only include cards belonging to this board's columns
   const colIds = new Set(columns.map(c => c.id))
   return { board, columns, cards: cards.filter(c => colIds.has(c.columnId)) }
+}
+
+// --- Position helpers (fractional indexing) ---
+
+// Lexicographic comparator for fractional-indexing string keys.
+const cmpPosition = (a, b) => a.position < b.position ? -1 : a.position > b.position ? 1 : 0
+
+// Given a drop index (0-based insertion point among visible siblings) and the
+// sorted list of siblings (excluding the moved item), compute a fractional key.
+// eg-kanban.js sends integer drop indices; this converts to a fractional key
+// so the event stores a commutative position value (no sibling reindexing).
+function positionForIndex(dropIndex, sortedSiblings) {
+  const before = dropIndex > 0 ? sortedSiblings[dropIndex - 1].position : null
+  const after = dropIndex < sortedSiblings.length ? sortedSiblings[dropIndex].position : null
+  return generateKeyBetween(before, after)
 }
 
 // --- SSE helpers ---
@@ -354,7 +336,7 @@ function Card({ card }) {
 function Column({ col, cards, columnCount }) {
   const colCards = cards
     .filter(c => c.columnId === col.id)
-    .sort((a, b) => a.position - b.position)
+    .sort(cmpPosition)
 
   return (
     <div
@@ -816,7 +798,10 @@ function Shell({ path, children }) {
           });
           boardObserver.observe(document.getElementById('app'), { childList: true, subtree: true });
 
-          // Card drop → PUT to SW
+          // Drag-and-drop uses raw fetch() instead of Datastar @put actions.
+          // eg-kanban.js emits CustomEvents on drop — wiring those into
+          // Datastar expressions would be awkward. The SSE morph from the
+          // SW handles the UI update; these are fire-and-forget commands.
           document.getElementById('app').addEventListener('kanban-card-drag-end', function(e) {
             var d = e.detail;
             if (!d.columnId || !d.cardId) return;
@@ -1075,10 +1060,11 @@ app.post('/boards', async (c) => {
     createdAt: Date.now(),
   }))
   // Seed default columns for the new board
+  const positions = generateNKeysBetween(null, null, 3)
   const defaultCols = [
-    { id: crypto.randomUUID(), title: 'Todo', position: 0, boardId },
-    { id: crypto.randomUUID(), title: 'Doing', position: 1, boardId },
-    { id: crypto.randomUUID(), title: 'Done', position: 2, boardId },
+    { id: crypto.randomUUID(), title: 'Todo', position: positions[0], boardId },
+    { id: crypto.randomUUID(), title: 'Doing', position: positions[1], boardId },
+    { id: crypto.randomUUID(), title: 'Done', position: positions[2], boardId },
   ]
   for (const col of defaultCols) {
     await appendEvent(createEvent('column.created', col))
@@ -1133,13 +1119,15 @@ app.post('/boards/:boardId/columns', async (c) => {
   if (!title) return c.body(null, 204)
 
   const db = await dbPromise
-  const columns = await db.getAllFromIndex('columns', 'byBoard', boardId)
+  const columns = (await db.getAllFromIndex('columns', 'byBoard', boardId))
+    .sort(cmpPosition)
+  const lastPos = columns.length > 0 ? columns[columns.length - 1].position : null
 
   await appendEvent(createEvent('column.created', {
     id: crypto.randomUUID(),
     title,
     boardId,
-    position: columns.length,
+    position: generateKeyBetween(lastPos, null),
   }))
   return c.body(null, 204)
 })
@@ -1152,13 +1140,15 @@ app.post('/columns/:columnId/cards', async (c) => {
   if (!title) return c.body(null, 204)
 
   const db = await dbPromise
-  const colCards = await db.getAllFromIndex('cards', 'byColumn', columnId)
+  const colCards = (await db.getAllFromIndex('cards', 'byColumn', columnId))
+    .sort(cmpPosition)
+  const lastPos = colCards.length > 0 ? colCards[colCards.length - 1].position : null
 
   await appendEvent(createEvent('card.created', {
     id: crypto.randomUUID(),
     columnId,
     title,
-    position: colCards.length,
+    position: generateKeyBetween(lastPos, null),
   }))
   return c.body(null, 204)
 })
@@ -1168,17 +1158,22 @@ app.put('/cards/:cardId/move', async (c) => {
   const cardId = c.req.param('cardId')
   const body = await c.req.json()
   const targetColumnId = body.dropColumnId
-  const targetPosition = parseInt(body.dropPosition, 10) || 0
+  const dropIndex = parseInt(body.dropPosition, 10) || 0
   if (!targetColumnId) return c.body(null, 400)
 
   const db = await dbPromise
   const card = await db.get('cards', cardId)
   if (!card) return c.body(null, 404)
 
+  // Get sorted cards in target column, excluding the card being moved
+  const siblings = (await db.getAllFromIndex('cards', 'byColumn', targetColumnId))
+    .filter(c => c.id !== cardId)
+    .sort(cmpPosition)
+
   await appendEvent(createEvent('card.moved', {
     id: cardId,
     columnId: targetColumnId,
-    position: targetPosition,
+    position: positionForIndex(dropIndex, siblings),
   }))
   return c.body(null, 204)
 })
@@ -1195,16 +1190,21 @@ app.delete('/columns/:columnId', async (c) => {
 app.put('/columns/:columnId/move', async (c) => {
   const columnId = c.req.param('columnId')
   const body = await c.req.json()
-  const targetPosition = parseInt(body.dropPosition, 10)
-  if (isNaN(targetPosition)) return c.body(null, 400)
+  const dropIndex = parseInt(body.dropPosition, 10)
+  if (isNaN(dropIndex)) return c.body(null, 400)
 
   const db = await dbPromise
   const col = await db.get('columns', columnId)
   if (!col) return c.body(null, 404)
 
+  // Get sorted columns in same board, excluding the column being moved
+  const siblings = (await db.getAllFromIndex('columns', 'byBoard', col.boardId))
+    .filter(c => c.id !== columnId)
+    .sort(cmpPosition)
+
   await appendEvent(createEvent('column.moved', {
     id: columnId,
-    position: targetPosition,
+    position: positionForIndex(dropIndex, siblings),
   }))
   return c.body(null, 204)
 })
