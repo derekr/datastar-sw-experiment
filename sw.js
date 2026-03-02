@@ -1,10 +1,17 @@
 import { createRouter } from '@remix-run/fetch-router';
 import { route } from '@remix-run/fetch-router/routes';
+import { openDB } from 'idb';
 
-let counter = 0;
+// DB opens lazily on first await — survives SW cold restarts
+const dbPromise = openDB('datastar-sw', 1, {
+  upgrade(db) {
+    db.createObjectStore('state');
+  },
+});
+
 const eventTarget = new EventTarget();
 
-console.log('[SW] Service Worker initializing, counter:', counter);
+console.log('[SW] Service Worker initializing');
 
 const routes = route({
   home: '/',
@@ -13,19 +20,23 @@ const routes = route({
 
 const router = createRouter();
 
-router.get(routes.home, ({ request }) => {
+router.get(routes.home, async ({ request }) => {
   const isDatastarRequest = request.headers.get('Datastar-Request') === 'true';
+  const db = await dbPromise;
+  const counter = (await db.get('state', 'counter')) ?? 0;
   console.log('[SW] / route hit, isDatastarRequest:', isDatastarRequest, 'counter:', counter);
-  
+
   if (isDatastarRequest) {
     console.log('[SW] Opening SSE connection for counter:', counter);
     const encoder = new TextEncoder();
     const stream = new ReadableStream({
       start(controller) {
-        const handler = () => {
+        const handler = async () => {
           try {
-            console.log('[SW] Increment event fired, counter:', counter);
-            const html = `<div id="counter"><span>${counter}</span></div>`;
+            const db = await dbPromise;
+            const current = (await db.get('state', 'counter')) ?? 0;
+            console.log('[SW] Increment event fired, counter:', current);
+            const html = `<div id="counter"><span>${current}</span></div>`;
             const data = `event: datastar-patch-elements\ndata: elements ${html}\n\n`;
             controller.enqueue(encoder.encode(data));
           } catch (e) {
@@ -33,10 +44,10 @@ router.get(routes.home, ({ request }) => {
             eventTarget.removeEventListener('increment', handler);
           }
         };
-        
+
         eventTarget.addEventListener('increment', handler);
         console.log('[SW] Event listener added');
-        
+
         // Initial event patches the app shell content via inner mode
         const appHtml = `<div id="counter"><span>${counter}</span></div><button data-on:click="@post('${routes.increment.href()}')">Increment</button>`;
         const initialData = `event: datastar-patch-elements\ndata: mode inner\ndata: selector #app\ndata: elements ${appHtml}\n\n`;
@@ -56,7 +67,7 @@ router.get(routes.home, ({ request }) => {
       }
     });
   }
-  
+
   return new Response(`
     <!DOCTYPE html>
     <html>
@@ -74,12 +85,13 @@ router.get(routes.home, ({ request }) => {
   `, { headers: { 'Content-Type': 'text/html' } });
 });
 
-router.post(routes.increment, () => {
-  console.log('[SW] /increment hit, current counter:', counter);
-  counter++;
-  console.log('[SW] Counter incremented to:', counter);
+router.post(routes.increment, async () => {
+  const db = await dbPromise;
+  const counter = (await db.get('state', 'counter')) ?? 0;
+  const next = counter + 1;
+  await db.put('state', next, 'counter');
+  console.log('[SW] /increment:', counter, '->', next);
   eventTarget.dispatchEvent(new Event('increment'));
-  console.log('[SW] Increment event dispatched');
   return new Response(null, { status: 204 });
 });
 
@@ -95,7 +107,7 @@ self.addEventListener('activate', (event) => {
 
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
-  
+
   if (url.origin !== self.location.origin) {
     return;
   }
