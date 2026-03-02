@@ -35,7 +35,7 @@ function upcast(event) {
   return e
 }
 
-function createEvent(type, data) {
+function createEvent(type, data, { correlationId, causationId } = {}) {
   return {
     id: crypto.randomUUID(),
     type,
@@ -43,6 +43,8 @@ function createEvent(type, data) {
     data,
     ts: Date.now(),
     synced: false,
+    correlationId: correlationId || crypto.randomUUID(),
+    causationId: causationId || null,
   }
 }
 
@@ -1054,11 +1056,13 @@ app.post('/boards', async (c) => {
   if (!title) return c.body(null, 204)
 
   const boardId = crypto.randomUUID()
-  await appendEvent(createEvent('board.created', {
+  const correlationId = crypto.randomUUID()
+  const boardEvent = createEvent('board.created', {
     id: boardId,
     title,
     createdAt: Date.now(),
-  }))
+  }, { correlationId })
+  await appendEvent(boardEvent)
   // Seed default columns for the new board
   const positions = generateNKeysBetween(null, null, 3)
   const defaultCols = [
@@ -1067,7 +1071,7 @@ app.post('/boards', async (c) => {
     { id: crypto.randomUUID(), title: 'Done', position: positions[2], boardId },
   ]
   for (const col of defaultCols) {
-    await appendEvent(createEvent('column.created', col))
+    await appendEvent(createEvent('column.created', col, { correlationId, causationId: boardEvent.id }))
   }
   return c.body(null, 204)
 })
