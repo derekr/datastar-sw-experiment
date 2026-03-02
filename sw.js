@@ -61,12 +61,12 @@ router.get(routes.home, ({ request }) => {
     <html>
       <head>
         <title>Datastar SW Demo</title>
-        <script type="module" src="https://cdn.jsdelivr.net/gh/starfederation/datastar@1.0.0-RC.5/bundles/datastar.js"></script>
+        <script type="module" src="https://cdn.jsdelivr.net/gh/starfederation/datastar@1.0.0-RC.8/bundles/datastar.js"></script>
       </head>
       <body>
         <h1>Datastar Service Worker Demo</h1>
-        <div id="counter" data-on-load="@get('${routes.home.href()}')"><span>${counter}</span></div>
-        <button data-on-click="@post('${routes.increment.href()}')">Increment</button>
+        <div id="counter" data-init="@get('${routes.home.href()}')"><span>${counter}</span></div>
+        <button data-on:click="@post('${routes.increment.href()}')">Increment</button>
       </body>
     </html>
   `, { headers: { 'Content-Type': 'text/html' } });
