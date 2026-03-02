@@ -147,22 +147,49 @@ const bus = new EventTarget()
 // Idempotent: skips events already in the log (by event ID).
 const ALL_STORES = ['events', 'boards', 'columns', 'cards']
 
+// Resolve boardId from event data + projection stores (within an open tx).
+async function boardIdForEvent(event, tx) {
+  const { type, data } = event
+  if (type.startsWith('board.')) return data.id
+  if (data.boardId) return data.boardId
+  // Card events: look up column → boardId
+  if (type.startsWith('card.') && data.columnId) {
+    const col = await tx.objectStore('columns').get(data.columnId)
+    return col?.boardId || null
+  }
+  // column.moved/deleted: look up column directly
+  if (type.startsWith('column.') && data.id) {
+    const col = await tx.objectStore('columns').get(data.id)
+    return col?.boardId || null
+  }
+  return null
+}
+
 // Append multiple events atomically in a single IDB transaction.
-// Dispatches one bus event per appended event after commit.
+// Dispatches scoped bus events after commit: board:<id>:changed for
+// board-specific events, boards:changed for board-level mutations.
 async function appendEvents(events) {
   const db = await dbPromise
   const tx = db.transaction(ALL_STORES, 'readwrite')
-  const appended = []
+  const appended = [] // [{ event, boardId }]
   for (const event of events) {
     const existing = await tx.objectStore('events').index('byId').get(event.id)
     if (existing) continue
+    // Resolve boardId before apply (column may be deleted by applyEvent)
+    const boardId = await boardIdForEvent(event, tx)
     await tx.objectStore('events').put(event)
     await applyEvent(event, tx)
-    appended.push(event)
+    appended.push({ event, boardId })
   }
   await tx.done
-  for (const event of appended) {
-    bus.dispatchEvent(new CustomEvent('boardChanged', { detail: event }))
+  for (const { event, boardId } of appended) {
+    if (boardId) {
+      bus.dispatchEvent(new CustomEvent(`board:${boardId}:changed`, { detail: event }))
+    }
+    if (event.type.startsWith('board.')) {
+      bus.dispatchEvent(new CustomEvent('boards:changed', { detail: event }))
+    }
+    bus.dispatchEvent(new CustomEvent('events:changed', { detail: event }))
   }
 }
 
@@ -182,8 +209,14 @@ async function rebuildProjection() {
   for (const event of allEvents) {
     await applyEvent(event, tx)
   }
+  const boardIds = (await tx.objectStore('boards').getAllKeys())
   await tx.done
-  bus.dispatchEvent(new CustomEvent('boardChanged', { detail: null }))
+  // Notify all scoped listeners after full rebuild
+  bus.dispatchEvent(new CustomEvent('boards:changed', { detail: null }))
+  for (const id of boardIds) {
+    bus.dispatchEvent(new CustomEvent(`board:${id}:changed`, { detail: null }))
+  }
+  bus.dispatchEvent(new CustomEvent('events:changed', { detail: null }))
 }
 
 // --- Initialization ---
@@ -1047,10 +1080,9 @@ app.get('/', async (c) => {
         if (evt?.type === 'board.deleted') {
           push('#boards-list', 'outer', { useViewTransition: true })
         }
-        // Other events (column/card changes) — no real-time update needed
       }
-      bus.addEventListener('boardChanged', handler)
-      stream.onAbort(() => bus.removeEventListener('boardChanged', handler))
+      bus.addEventListener('boards:changed', handler)
+      stream.onAbort(() => bus.removeEventListener('boards:changed', handler))
 
       await push('#app', 'inner')
       while (!stream.closed) { await stream.sleep(30000) }
@@ -1107,9 +1139,10 @@ app.get('/boards/:boardId', async (c) => {
         await stream.writeSSE(dsePatch(selector, <Board board={data.board} columns={data.columns} cards={data.cards} />, mode, opts))
       }
 
+      const topic = `board:${boardId}:changed`
       const handler = () => pushBoard('#board', 'outer', { useViewTransition: true })
-      bus.addEventListener('boardChanged', handler)
-      stream.onAbort(() => bus.removeEventListener('boardChanged', handler))
+      bus.addEventListener(topic, handler)
+      stream.onAbort(() => bus.removeEventListener(topic, handler))
 
       await pushBoard('#app', 'inner')
       while (!stream.closed) { await stream.sleep(30000) }
@@ -1243,8 +1276,8 @@ app.get('/events', async (c) => {
       }
 
       const handler = () => pushEventList('#event-list', 'outer')
-      bus.addEventListener('boardChanged', handler)
-      stream.onAbort(() => bus.removeEventListener('boardChanged', handler))
+      bus.addEventListener('events:changed', handler)
+      stream.onAbort(() => bus.removeEventListener('events:changed', handler))
 
       // Initial render — patch into app container
       await pushEventList('#events-app', 'inner')
