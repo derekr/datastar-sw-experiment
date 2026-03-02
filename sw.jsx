@@ -208,6 +208,7 @@ async function appendEvent(event) {
 
 // Nuclear rebuild: clear projection, replay all events in order.
 // Use when projection is suspected to be out of sync with the event log.
+// Saves a snapshot afterward so future incremental rebuilds can skip replayed events.
 async function rebuildProjection() {
   const db = await dbPromise
   const tx = db.transaction(ALL_STORES, 'readwrite')
@@ -218,9 +219,48 @@ async function rebuildProjection() {
   for (const event of allEvents) {
     await applyEvent(event, tx)
   }
+  // Save snapshot: projection state at the last replayed event seq
+  const lastSeq = allEvents.length > 0 ? allEvents[allEvents.length - 1].seq : 0
+  await tx.objectStore('meta').put({
+    key: 'snapshot',
+    seq: lastSeq,
+    boards: await tx.objectStore('boards').getAll(),
+    columns: await tx.objectStore('columns').getAll(),
+    cards: await tx.objectStore('cards').getAll(),
+  })
   const boardIds = (await tx.objectStore('boards').getAllKeys())
   await tx.done
   // Notify all scoped listeners after full rebuild
+  bus.dispatchEvent(new CustomEvent('boards:changed', { detail: null }))
+  for (const id of boardIds) {
+    bus.dispatchEvent(new CustomEvent(`board:${id}:changed`, { detail: null }))
+  }
+  bus.dispatchEvent(new CustomEvent('events:changed', { detail: null }))
+}
+
+// Incremental rebuild: restore from snapshot, replay only newer events.
+// Falls back to full rebuildProjection() if no snapshot exists.
+async function rebuildFromSnapshot() {
+  const db = await dbPromise
+  const snapshot = await db.get('meta', 'snapshot')
+  if (!snapshot) return rebuildProjection()
+
+  const tx = db.transaction(ALL_STORES, 'readwrite')
+  // Restore projection from snapshot
+  await tx.objectStore('boards').clear()
+  await tx.objectStore('columns').clear()
+  await tx.objectStore('cards').clear()
+  for (const b of snapshot.boards) await tx.objectStore('boards').put(b)
+  for (const c of snapshot.columns) await tx.objectStore('columns').put(c)
+  for (const c of snapshot.cards) await tx.objectStore('cards').put(c)
+  // Replay only events after the snapshot seq
+  const range = IDBKeyRange.lowerBound(snapshot.seq, true) // exclusive
+  const newEvents = await tx.objectStore('events').getAll(range)
+  for (const event of newEvents) {
+    await applyEvent(event, tx)
+  }
+  const boardIds = (await tx.objectStore('boards').getAllKeys())
+  await tx.done
   bus.dispatchEvent(new CustomEvent('boards:changed', { detail: null }))
   for (const id of boardIds) {
     bus.dispatchEvent(new CustomEvent(`board:${id}:changed`, { detail: null }))
