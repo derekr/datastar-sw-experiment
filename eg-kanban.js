@@ -15,6 +15,8 @@
   var SCROLL_SPEED = 15        // camera scroll px/frame
   var FLIP_DURATION = 200
   var FLIP_EASING = 'cubic-bezier(0.2, 0, 0, 1)'
+  var REORDER_DURATION = 150   // ms for sibling reorder transitions during drag
+  var REORDER_EASING = 'cubic-bezier(0.2, 0, 0, 1)'
   var MO_TIMEOUT = 500         // ms to wait for morph before cleaning up FLIP
 
   // ── Helpers ────────────────────────────────────────────────────────────────
@@ -95,6 +97,44 @@
     } else {
       container.appendChild(ghost)
     }
+  }
+
+  // ── Reorder FLIP (sibling transitions during drag) ──────────────────────────
+  // Snapshot children rects, run a DOM mutation, then animate any that moved.
+
+  function animateFromMap(container, childSelector, beforeMap) {
+    var after = container.querySelectorAll(childSelector)
+    for (var j = 0; j < after.length; j++) {
+      var el = after[j]
+      var oldRect = beforeMap.get(el)
+      if (!oldRect) continue
+
+      var newRect = el.getBoundingClientRect()
+      var dx = oldRect.left - newRect.left
+      var dy = oldRect.top - newRect.top
+      if (Math.abs(dx) < 1 && Math.abs(dy) < 1) continue
+
+      var running = el._kanbanReorder
+      if (running) running.cancel()
+
+      el._kanbanReorder = el.animate(
+        [{ transform: 'translate(' + dx + 'px,' + dy + 'px)' }, { transform: 'none' }],
+        { duration: REORDER_DURATION, easing: REORDER_EASING }
+      )
+      el._kanbanReorder.onfinish = el._kanbanReorder.oncancel = (function (e) {
+        return function () { e._kanbanReorder = null }
+      })(el)
+    }
+  }
+
+  function flipChildren(container, childSelector, mutationFn) {
+    var children = Array.from(container.querySelectorAll(childSelector))
+    var before = new Map()
+    for (var i = 0; i < children.length; i++) {
+      before.set(children[i], children[i].getBoundingClientRect())
+    }
+    mutationFn()
+    animateFromMap(container, childSelector, before)
   }
 
   // ── FLIP Animation (MutationObserver-based, waits for SSE morph) ───────────
@@ -280,14 +320,46 @@
         startY: e.clientY
       }
 
-      el.setAttribute('data-kanban-dragging', '')
-      el.style.position = 'fixed'
-      el.style.left = rect.left + 'px'
-      el.style.top = rect.top + 'px'
-      el.style.width = rect.width + 'px'
-      el.style.height = rect.height + 'px'
-      el.style.zIndex = '100'
-      el.style.pointerEvents = 'none'
+      // Determine container and create ghost BEFORE going position:fixed,
+      // so flipChildren can snapshot siblings in their current positions.
+      var ghostContainer, childSel, ghost
+      if (p.type === 'card') {
+        ghostContainer = el.closest('.cards-container')
+        childSel = '.card:not([data-kanban-dragging]), .card-ghost'
+        ghost = createGhost('card-ghost', rect.width, rect.height)
+        cardIndicator = ghost
+      } else {
+        ghostContainer = getScrollContainer()
+        childSel = '.column:not([data-kanban-dragging]), .column-ghost'
+        ghost = createGhost('column-ghost', rect.width, rect.height)
+        colIndicator = ghost
+      }
+
+      // Pull element out of flow + insert ghost in one batched mutation,
+      // wrapped in FLIP so siblings animate smoothly.
+      var nextSib = el.nextElementSibling
+      if (ghostContainer) {
+        flipChildren(ghostContainer, childSel, function () {
+          el.setAttribute('data-kanban-dragging', '')
+          el.style.position = 'fixed'
+          el.style.left = rect.left + 'px'
+          el.style.top = rect.top + 'px'
+          el.style.width = rect.width + 'px'
+          el.style.height = rect.height + 'px'
+          el.style.zIndex = '100'
+          el.style.pointerEvents = 'none'
+          ghostContainer.insertBefore(ghost, nextSib)
+        })
+      } else {
+        el.setAttribute('data-kanban-dragging', '')
+        el.style.position = 'fixed'
+        el.style.left = rect.left + 'px'
+        el.style.top = rect.top + 'px'
+        el.style.width = rect.width + 'px'
+        el.style.height = rect.height + 'px'
+        el.style.zIndex = '100'
+        el.style.pointerEvents = 'none'
+      }
       document.body.style.cursor = 'grabbing'
 
       // Start camera
@@ -298,10 +370,8 @@
       }
 
       if (p.type === 'card') {
-        cardIndicator = createGhost('card-ghost', rect.width, rect.height)
         emit('card-drag-start', { cardId: getCardId(el), element: el })
       } else {
-        colIndicator = createGhost('column-ghost', rect.width, rect.height)
         emit('column-drag-start', { columnId: getColumnId(el), element: el })
       }
 
@@ -355,9 +425,29 @@
       lastTarget = { key: key, columnId: columnId, position: position }
       lastTargetTime = performance.now()
 
-      // Position ghost placeholder
+      // Position ghost placeholder with sibling FLIP.
+      // If the ghost is moving between columns, FLIP both containers.
       if (cardIndicator) {
-        positionGhost(cardIndicator, container, position, '.card:not([data-kanban-dragging])')
+        var oldContainer = cardIndicator.parentNode
+        if (oldContainer && oldContainer !== container) {
+          // Cross-column move: snapshot both, mutate, animate both
+          var srcChildren = Array.from(oldContainer.querySelectorAll('.card:not([data-kanban-dragging]), .card-ghost'))
+          var dstChildren = Array.from(container.querySelectorAll('.card:not([data-kanban-dragging]), .card-ghost'))
+          var beforeMap = new Map()
+          srcChildren.forEach(function (c) { beforeMap.set(c, c.getBoundingClientRect()) })
+          dstChildren.forEach(function (c) { beforeMap.set(c, c.getBoundingClientRect()) })
+
+          positionGhost(cardIndicator, container, position, '.card:not([data-kanban-dragging])')
+
+          // Animate source container children
+          animateFromMap(oldContainer, '.card:not([data-kanban-dragging]), .card-ghost', beforeMap)
+          // Animate destination container children
+          animateFromMap(container, '.card:not([data-kanban-dragging]), .card-ghost', beforeMap)
+        } else {
+          flipChildren(container, '.card:not([data-kanban-dragging]), .card-ghost', function () {
+            positionGhost(cardIndicator, container, position, '.card:not([data-kanban-dragging])')
+          })
+        }
       }
 
       emit('card-drag-move', {
@@ -380,7 +470,9 @@
       lastTargetTime = performance.now()
 
       if (colIndicator) {
-        positionGhost(colIndicator, sc, position, '.column:not([data-kanban-dragging])')
+        flipChildren(sc, '.column:not([data-kanban-dragging]), .column-ghost', function () {
+          positionGhost(colIndicator, sc, position, '.column:not([data-kanban-dragging])')
+        })
       }
 
       emit('column-drag-move', {
