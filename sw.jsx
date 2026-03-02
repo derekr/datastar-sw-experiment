@@ -220,11 +220,14 @@ function flattenJsx(jsx) {
   return jsx.toString().replace(/\n\s*/g, ' ').replace(/\s{2,}/g, ' ').trim()
 }
 
-function dsePatch(selector, jsx, mode = 'outer') {
+function dsePatch(selector, jsx, mode = 'outer', { useViewTransition = false } = {}) {
   const html = flattenJsx(jsx)
+  const lines = [`mode ${mode}`, `selector ${selector}`]
+  if (useViewTransition) lines.push('useViewTransition true')
+  lines.push(`elements ${html}`)
   return {
     event: 'datastar-patch-elements',
-    data: `mode ${mode}\nselector ${selector}\nelements ${html}`,
+    data: lines.join('\n'),
   }
 }
 
@@ -234,7 +237,14 @@ function Card({ card }) {
   const dragstart = [
     `evt.dataTransfer.effectAllowed = 'move'`,
     `evt.dataTransfer.setData('cardId', '${card.id}')`,
-    `evt.target.classList.add('dragging')`,
+    `evt.target.setAttribute('data-dragging', '')`,
+  ].join('; ')
+
+  const dragend = [
+    `evt.target.removeAttribute('data-dragging')`,
+    // Clean up any lingering indicators when drag ends without a drop
+    `document.querySelectorAll('.drop-indicator').forEach(el => el.remove())`,
+    `document.querySelectorAll('.cards-container').forEach(el => { el.removeAttribute('data-drop-index'); el.classList.remove('drag-over') })`,
   ].join('; ')
 
   return (
@@ -244,7 +254,7 @@ function Card({ card }) {
       data-card-id={card.id}
       style={`view-transition-name: card-${card.id}`}
       data-on:dragstart={dragstart}
-      data-on:dragend="evt.target.classList.remove('dragging')"
+      data-on:dragend={dragend}
     >
       <span>{card.title}</span>
       <button
@@ -262,15 +272,48 @@ function Column({ col, cards }) {
     .filter(c => c.columnId === col.id)
     .sort((a, b) => a.position - b.position)
 
+  // dragover: calculate drop index from cursor Y vs card midpoints, show indicator
+  const dragover = [
+    `evt.preventDefault()`,
+    `evt.dataTransfer.dropEffect = 'move'`,
+    `const container = evt.currentTarget`,
+    `container.classList.add('drag-over')`,
+    // Get non-dragging cards for position calculation
+    `const cards = Array.from(container.querySelectorAll('.card:not([data-dragging])'))`,
+    // Calculate drop index from cursor Y vs card midpoints
+    `let dropIdx = cards.length`,
+    `for (let i = 0; i < cards.length; i++) { const rect = cards[i].getBoundingClientRect(); if (evt.clientY < rect.top + rect.height / 2) { dropIdx = i; break } }`,
+    // Hysteresis: only update indicator if index changed
+    `if (container.getAttribute('data-drop-index') === String(dropIdx)) return`,
+    `container.setAttribute('data-drop-index', dropIdx)`,
+    // Create indicator if needed, insert at drop position
+    `let indicator = container.querySelector('.drop-indicator')`,
+    `if (!indicator) { indicator = document.createElement('div'); indicator.className = 'drop-indicator'; indicator.setAttribute('data-card-id', 'drop-indicator') }`,
+    `if (cards[dropIdx]) { container.insertBefore(indicator, cards[dropIdx]) } else { container.appendChild(indicator) }`,
+  ].join('; ')
+
+  const dragleave = [
+    // Only remove if leaving the container (not entering a child)
+    `if (evt.currentTarget.contains(evt.relatedTarget)) return`,
+    `evt.currentTarget.classList.remove('drag-over')`,
+    `evt.currentTarget.removeAttribute('data-drop-index')`,
+    `const ind = evt.currentTarget.querySelector('.drop-indicator'); if (ind) ind.remove()`,
+  ].join('; ')
+
   const drop = [
     `evt.preventDefault()`,
-    `evt.currentTarget.classList.remove('drag-over')`,
+    `const container = evt.currentTarget`,
+    `container.classList.remove('drag-over')`,
+    // Read drop index from the indicator position, not recalculating
+    `const dropIdx = parseInt(container.getAttribute('data-drop-index') || '0', 10)`,
+    // Clean up indicator
+    `const ind = container.querySelector('.drop-indicator'); if (ind) ind.remove()`,
+    `container.removeAttribute('data-drop-index')`,
     `const cardId = evt.dataTransfer.getData('cardId')`,
-    `const cards = evt.currentTarget.querySelectorAll('.card')`,
-    `let pos = cards.length`,
-    `for (let i = 0; i < cards.length; i++) { const rect = cards[i].getBoundingClientRect(); if (evt.clientY < rect.top + rect.height / 2) { pos = i; break } }`,
+    // Start FLIP: snapshot original position, animate from cursor after morph lands
+    `window.__setDropFlip(cardId, evt.clientX, evt.clientY)`,
     `$dropColumnId = '${col.id}'`,
-    `$dropPosition = pos`,
+    `$dropPosition = dropIdx`,
     `@put('/cards/' + cardId + '/move')`,
   ].join('; ')
 
@@ -283,8 +326,8 @@ function Column({ col, cards }) {
       <div
         class="cards-container"
         data-column-id={col.id}
-        data-on:dragover="evt.preventDefault(); evt.currentTarget.classList.add('drag-over')"
-        data-on:dragleave="evt.currentTarget.classList.remove('drag-over')"
+        data-on:dragover={dragover}
+        data-on:dragleave={dragleave}
         data-on:drop={drop}
       >
         {colCards.length === 0
@@ -404,8 +447,18 @@ h1 { font-size: 1.5rem; font-weight: 600; margin-bottom: 24px; }
 
 .card:hover { border-color: #475569; }
 .card:active { cursor: grabbing; }
-.card.dragging { opacity: 0.4; transform: scale(0.97); }
+.card[data-dragging] { opacity: 0.3; transform: scale(0.97); }
 .card span { font-size: 0.9rem; word-break: break-word; }
+
+.drop-indicator {
+  height: 3px;
+  background: #6366f1;
+  border-radius: 2px;
+  pointer-events: none;
+  view-transition-name: none;
+  box-shadow: 0 0 8px rgba(99, 102, 241, 0.5);
+  flex-shrink: 0;
+}
 
 .delete-btn {
   background: none;
@@ -454,11 +507,17 @@ h1 { font-size: 1.5rem; font-weight: 600; margin-bottom: 24px; }
 
 .add-form button:hover { background: #4f46e5; }
 
-::view-transition-old(*) { animation: fade-out 0.15s ease-out; }
-::view-transition-new(*) { animation: fade-in 0.2s ease-in; }
+::view-transition-group(*) {
+  animation-duration: 200ms;
+  animation-timing-function: cubic-bezier(0.2, 0, 0, 1);
+}
+::view-transition-old(*) { animation: none; opacity: 0; }
+::view-transition-new(*) { animation: none; }
 
-@keyframes fade-out { to { opacity: 0; transform: scale(0.95); } }
-@keyframes fade-in { from { opacity: 0; transform: scale(0.95); } }
+.card[data-dropping] {
+  z-index: 10;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+}
 `
 
 function Shell() {
@@ -492,8 +551,55 @@ function Shell() {
               setInterval(() => reg.update(), 60 * 1000);
             });
           }
-          // Prevent browser from evicting IndexedDB under storage pressure
           navigator.storage?.persist?.();
+
+          // FLIP animation for the dropped card.
+          // Uses MutationObserver to:
+          //   1. Keep view-transition-name: none through the morph (so VT animates
+          //      other cards but not this one — prevents snap-back-from-old-position)
+          //   2. Detect when the morph moves the card, then FLIP from cursor → new pos
+          // MO fires as microtask after morph but before VT captures new state.
+          window.__setDropFlip = function(cardId, cursorX, cursorY) {
+            var card = document.querySelector('[data-card-id="' + cardId + '"]');
+            if (!card) return;
+            card.style.viewTransitionName = 'none';
+            var origRect = card.getBoundingClientRect();
+            var done = false;
+
+            var mo = new MutationObserver(function(mutations) {
+              if (done) return;
+              var el = document.querySelector('[data-card-id="' + cardId + '"]');
+              if (!el) { done = true; mo.disconnect(); return; }
+              // Keep this card out of view transitions (morph may restore VTN)
+              if (el.style.viewTransitionName !== 'none') el.style.viewTransitionName = 'none';
+              // Wait for card to actually move (morph landed)
+              var rect = el.getBoundingClientRect();
+              if (Math.abs(rect.left - origRect.left) < 1 && Math.abs(rect.top - origRect.top) < 1) return;
+              // Card moved! Run FLIP from cursor position to new DOM position
+              done = true;
+              mo.disconnect();
+              var dx = cursorX - (rect.left + rect.width / 2);
+              var dy = cursorY - (rect.top + rect.height / 2);
+              if (Math.abs(dx) < 2 && Math.abs(dy) < 2) {
+                el.style.viewTransitionName = '';
+                return;
+              }
+              el.setAttribute('data-dropping', '');
+              el.animate(
+                [{ transform: 'translate(' + dx + 'px,' + dy + 'px)' }, { transform: 'none' }],
+                { duration: 200, easing: 'cubic-bezier(0.2, 0, 0, 1)' }
+              ).onfinish = function() {
+                el.removeAttribute('data-dropping');
+                el.style.viewTransitionName = '';
+              };
+            });
+
+            mo.observe(document.getElementById('app'), { childList: true, subtree: true });
+            // Timeout: clean up if morph never arrives (e.g. drop at same position)
+            setTimeout(function() {
+              if (!done) { done = true; mo.disconnect(); card.style.viewTransitionName = ''; }
+            }, 500);
+          };
         `)}</script>
       </body>
     </html>
@@ -681,16 +787,16 @@ app.get('/', async (c) => {
 
   if (c.req.header('Datastar-Request') === 'true') {
     return streamSSE(c, async (stream) => {
-      const pushBoard = async (selector, mode) => {
+      const pushBoard = async (selector, mode, opts) => {
         const { columns, cards } = await getBoard()
-        await stream.writeSSE(dsePatch(selector, <Board columns={columns} cards={cards} />, mode))
+        await stream.writeSSE(dsePatch(selector, <Board columns={columns} cards={cards} />, mode, opts))
       }
 
-      const handler = () => pushBoard('#board', 'outer')
+      const handler = () => pushBoard('#board', 'outer', { useViewTransition: true })
       bus.addEventListener('boardChanged', handler)
       stream.onAbort(() => bus.removeEventListener('boardChanged', handler))
 
-      // Initial render — patch into app shell
+      // Initial render — patch into app shell (no view transition)
       await pushBoard('#app', 'inner')
 
       // Keep stream open until client disconnects
