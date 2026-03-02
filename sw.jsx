@@ -428,7 +428,7 @@ function Board({ board, columns, cards }) {
   return (
     <div id="board">
       <div class="board-header">
-        <a href="/" class="back-link" data-on:click__prevent="window.location.href = '/'">← Boards</a>
+        <a href="/" class="back-link">← Boards</a>
         <h1>{board.title}</h1>
       </div>
       <div class="columns">
