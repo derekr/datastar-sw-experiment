@@ -70,58 +70,43 @@
     return cols.length
   }
 
-  // ── Drop Indicators ────────────────────────────────────────────────────────
+  // ── Ghost Placeholders ──────────────────────────────────────────────────────
+  // Reserve space where the item will land so siblings flow around it naturally.
 
-  function createCardIndicator() {
+  function createGhost(className, width, height) {
     var el = document.createElement('div')
-    el.className = 'drop-indicator'
+    el.className = className
+    el.style.width = width + 'px'
+    el.style.height = height + 'px'
     el.style.pointerEvents = 'none'
-    el.setAttribute('data-card-id', 'drop-indicator')
+    el.style.viewTransitionName = 'none'
     return el
   }
 
-  function createColumnIndicator() {
-    var el = document.createElement('div')
-    el.className = 'col-drop-indicator'
-    el.style.pointerEvents = 'none'
-    return el
+  function removeGhost(ghost) {
+    if (ghost && ghost.parentNode) ghost.parentNode.removeChild(ghost)
   }
 
-  function removeIndicator(indicator) {
-    if (indicator && indicator.parentNode) indicator.parentNode.removeChild(indicator)
-  }
-
-  function positionCardIndicator(indicator, container, position) {
-    var cards = Array.from(container.querySelectorAll('.card:not([data-kanban-dragging])'))
-    if (!indicator.parentNode || indicator.parentNode !== container) {
-      container.appendChild(indicator)
-    }
-    if (cards[position]) {
-      container.insertBefore(indicator, cards[position])
+  function positionGhost(ghost, container, position, childSelector) {
+    var children = Array.from(container.querySelectorAll(childSelector))
+    if (ghost.parentNode !== container) container.appendChild(ghost)
+    if (children[position]) {
+      container.insertBefore(ghost, children[position])
     } else {
-      container.appendChild(indicator)
-    }
-  }
-
-  function positionColumnIndicator(indicator, columnsContainer, position) {
-    var cols = Array.from(columnsContainer.querySelectorAll('.column:not([data-kanban-dragging])'))
-    if (!indicator.parentNode || indicator.parentNode !== columnsContainer) {
-      columnsContainer.appendChild(indicator)
-    }
-    if (cols[position]) {
-      columnsContainer.insertBefore(indicator, cols[position])
-    } else {
-      columnsContainer.appendChild(indicator)
+      container.appendChild(ghost)
     }
   }
 
   // ── FLIP Animation (MutationObserver-based, waits for SSE morph) ───────────
   //
-  // Called AFTER cleanupDrag() restores the element to normal flow.
-  // The element is back in its original DOM position. We watch for the
-  // SSE morph to move it to the new position, then FLIP from cursorX/Y.
+  // Called AFTER softCleanup() — the element is still position:fixed at the
+  // cursor, marked with data-kanban-hold. When Idiomorph processes the SSE
+  // morph, it resets all inline styles (they're not in the server HTML) and
+  // removes data-kanban-hold. The MO detects the attribute removal, then
+  // FLIP-animates from firstRect (cursor position) to new flow position.
+  // Zero snap-back.
 
-  function setupFlip(itemSelector, cursorX, cursorY, opts) {
+  function setupFlip(itemSelector, firstRect, opts) {
     var el = document.querySelector(itemSelector)
     if (!el) return
     var suppressAll = opts && opts.suppressSiblings
@@ -135,8 +120,6 @@
       })
     }
 
-    // Snapshot the pre-morph position (element is back in original flow)
-    var preRect = el.getBoundingClientRect()
     var done = false
 
     function restoreAll() {
@@ -146,7 +129,21 @@
       })
     }
 
-    var mo = new MutationObserver(function () {
+    // Force-clean all drag inline styles from the element (in case Idiomorph
+    // doesn't fully reset them, e.g. if it matches by id but keeps attributes).
+    function forceCleanEl(target) {
+      target.removeAttribute('data-kanban-dragging')
+      target.removeAttribute('data-kanban-hold')
+      target.style.position = ''
+      target.style.left = ''
+      target.style.top = ''
+      target.style.width = ''
+      target.style.height = ''
+      target.style.zIndex = ''
+      target.style.pointerEvents = ''
+    }
+
+    var mo = new MutationObserver(function (mutations) {
       if (done) return
       var target = document.querySelector(itemSelector)
       if (!target) { done = true; mo.disconnect(); restoreAll(); return }
@@ -159,18 +156,24 @@
         })
       }
 
-      // Check if element moved from its pre-morph position
-      var rect = target.getBoundingClientRect()
-      if (Math.abs(rect.left - preRect.left) < 1 && Math.abs(rect.top - preRect.top) < 1) return
+      // Detect morph: check if data-kanban-hold was removed by Idiomorph,
+      // OR if the element no longer has position:fixed (Idiomorph reset styles)
+      var holdRemoved = !target.hasAttribute('data-kanban-hold')
+      var positionReset = target.style.position !== 'fixed'
+      if (!holdRemoved && !positionReset) return
 
-      // Element moved — FLIP from cursor position to new DOM position
+      // Morph landed — set dropping FIRST (for z-index), then clean drag styles
       done = true
       mo.disconnect()
-      var dx = cursorX - (rect.left + rect.width / 2)
-      var dy = cursorY - (rect.top + rect.height / 2)
-      if (Math.abs(dx) < 2 && Math.abs(dy) < 2) { restoreAll(); return }
-
       target.setAttribute('data-kanban-dropping', '')
+      forceCleanEl(target)
+
+      // FLIP from firstRect (where cursor was) to new DOM position
+      var rect = target.getBoundingClientRect()
+      var dx = (firstRect.left + firstRect.width / 2) - (rect.left + rect.width / 2)
+      var dy = (firstRect.top + firstRect.height / 2) - (rect.top + rect.height / 2)
+      if (Math.abs(dx) < 2 && Math.abs(dy) < 2) { target.removeAttribute('data-kanban-dropping'); restoreAll(); return }
+
       target.animate(
         [{ transform: 'translate(' + dx + 'px,' + dy + 'px)' }, { transform: 'none' }],
         { duration: FLIP_DURATION, easing: FLIP_EASING }
@@ -181,9 +184,21 @@
     })
 
     var root = document.getElementById('app')
-    if (root) mo.observe(root, { childList: true, subtree: true })
+    if (root) mo.observe(root, { childList: true, subtree: true, attributes: true, attributeFilter: ['data-kanban-hold', 'style'] })
+
+    // Safety timeout: if morph never arrives, force cleanup
     setTimeout(function () {
-      if (!done) { done = true; mo.disconnect(); restoreAll() }
+      if (!done) {
+        done = true
+        mo.disconnect()
+        var target = document.querySelector(itemSelector)
+        if (target) forceCleanEl(target)
+        // Remove any orphaned ghost placeholders
+        document.querySelectorAll('.card-ghost, .column-ghost').forEach(function (g) {
+          g.parentNode.removeChild(g)
+        })
+        restoreAll()
+      }
     }, MO_TIMEOUT)
   }
 
@@ -283,10 +298,10 @@
       }
 
       if (p.type === 'card') {
-        cardIndicator = createCardIndicator()
+        cardIndicator = createGhost('card-ghost', rect.width, rect.height)
         emit('card-drag-start', { cardId: getCardId(el), element: el })
       } else {
-        colIndicator = createColumnIndicator()
+        colIndicator = createGhost('column-ghost', rect.width, rect.height)
         emit('column-drag-start', { columnId: getColumnId(el), element: el })
       }
 
@@ -340,9 +355,9 @@
       lastTarget = { key: key, columnId: columnId, position: position }
       lastTargetTime = performance.now()
 
-      // Position indicator
+      // Position ghost placeholder
       if (cardIndicator) {
-        positionCardIndicator(cardIndicator, container, position)
+        positionGhost(cardIndicator, container, position, '.card:not([data-kanban-dragging])')
       }
 
       emit('card-drag-move', {
@@ -365,7 +380,7 @@
       lastTargetTime = performance.now()
 
       if (colIndicator) {
-        positionColumnIndicator(colIndicator, sc, position)
+        positionGhost(colIndicator, sc, position, '.column:not([data-kanban-dragging])')
       }
 
       emit('column-drag-move', {
@@ -375,10 +390,12 @@
       })
     }
 
+    // Full cleanup — used on cancel or when no FLIP needed
     function cleanupDrag() {
       if (!drag) return
       var el = drag.el
       el.removeAttribute('data-kanban-dragging')
+      el.removeAttribute('data-kanban-hold')
       el.style.position = ''
       el.style.left = ''
       el.style.top = ''
@@ -389,12 +406,28 @@
       document.body.style.cursor = ''
 
       if (camera) { camera.stop(); camera = null }
-      removeIndicator(cardIndicator); cardIndicator = null
-      removeIndicator(colIndicator); colIndicator = null
+      removeGhost(cardIndicator); cardIndicator = null
+      removeGhost(colIndicator); colIndicator = null
       lastTarget = null
       lastTargetTime = 0
 
       el.releasePointerCapture(drag.pointerId)
+      drag = null
+    }
+
+    // Partial cleanup — release pointer/camera but keep element at cursor
+    // for seamless handoff to Idiomorph. Element stays position:fixed until
+    // the SSE morph lands and Idiomorph resets the inline styles.
+    function softCleanup() {
+      if (!drag) return
+      document.body.style.cursor = ''
+      if (camera) { camera.stop(); camera = null }
+      // Ghost stays — Idiomorph removes it (not in server HTML)
+      lastTarget = null
+      lastTargetTime = 0
+      drag.el.releasePointerCapture(drag.pointerId)
+      // Mark element as "holding at cursor, waiting for morph"
+      drag.el.setAttribute('data-kanban-hold', '')
       drag = null
     }
 
@@ -409,6 +442,10 @@
 
       var cursorX = e.clientX, cursorY = e.clientY
 
+      // Capture firstRect WHILE element is still position:fixed at cursor.
+      // This is the "from" rect for the FLIP animation — no snap-back.
+      var firstRect = drag.el.getBoundingClientRect()
+
       if (drag.type === 'card') {
         var columns = getColumns()
         var target = findTargetColumn(cursorX, columns)
@@ -420,10 +457,13 @@
         }
         var cardId = getCardId(drag.el)
 
-        // Clean up drag state FIRST (restore to normal flow)
-        cleanupDrag()
-        // THEN set up FLIP — snapshots pre-morph position, waits for morph
-        setupFlip('[data-card-id="' + cardId + '"]', cursorX, cursorY, {
+        // Soft cleanup: release pointer/camera but keep element position:fixed
+        // at cursor. data-kanban-hold marks it as "waiting for morph".
+        softCleanup()
+        // Set up FLIP — watches for Idiomorph to process the morph (removing
+        // data-kanban-hold and resetting inline styles), then animates from
+        // firstRect to new flow position.
+        setupFlip('[data-card-id="' + cardId + '"]', firstRect, {
           suppressSiblings: false
         })
         emit('card-drag-end', { cardId: cardId, columnId: columnId, position: position })
@@ -433,11 +473,11 @@
         var colPosition = sc ? findColumnPosition(cursorX, sc, null) : 0
         var draggedColumnId = getColumnId(drag.el)
 
-        // Clean up drag state FIRST (restore to normal flow)
-        cleanupDrag()
-        // THEN set up FLIP — suppress VT on ALL columns AND cards so they
-        // move as a unit instead of each card animating independently
-        setupFlip('#column-' + draggedColumnId, cursorX, cursorY, {
+        // Soft cleanup: keep element at cursor position
+        softCleanup()
+        // FLIP — suppress VT on ALL columns AND cards so they move as a
+        // unit instead of each card animating independently
+        setupFlip('#column-' + draggedColumnId, firstRect, {
           suppressSiblings: true,
           siblingSelector: '.column, .card'
         })
@@ -466,20 +506,20 @@
       var type = null
       var el = null
 
-      // Column drag: grab via .drag-handle
-      var handle = target.closest('.drag-handle')
-      if (handle) {
-        el = handle.closest('.column')
-        type = 'column'
+      // Card drag: grab the card itself (but not buttons inside it)
+      if (target.closest('button') || target.closest('input') || target.closest('a')) return
+      var card = target.closest('.card')
+      if (card) {
+        el = card
+        type = 'card'
       }
 
-      // Card drag: grab the card itself (but not buttons inside it)
+      // Column drag: grab via .column-header (but not if we matched a card)
       if (!type) {
-        if (target.closest('button') || target.closest('input') || target.closest('a')) return
-        var card = target.closest('.card')
-        if (card) {
-          el = card
-          type = 'card'
+        var header = target.closest('.column-header')
+        if (header) {
+          el = header.closest('.column')
+          type = 'column'
         }
       }
 

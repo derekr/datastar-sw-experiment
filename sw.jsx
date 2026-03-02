@@ -297,7 +297,6 @@ function Column({ col, cards, columnCount }) {
       style={`view-transition-name: col-${col.id}; touch-action: none`}
     >
       <div class="column-header">
-        <span class="drag-handle">⠿</span>
         <h2>{col.title}</h2>
         <span class="count">{colCards.length}</span>
         {columnCount > 1 && (
@@ -371,38 +370,30 @@ body {
   min-width: 300px;
   max-width: 300px;
   flex-shrink: 0;
+  user-select: none;
 }
 
-.column[data-kanban-dragging] { opacity: 0.5; }
+.column[data-kanban-dragging],
+.column[data-kanban-hold] { opacity: 0.5; z-index: 100; }
+.column[data-kanban-dropping] { position: relative; z-index: 50; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3); }
 
-.col-drop-indicator {
-  width: 3px;
-  min-height: 80px;
-  background: #6366f1;
-  border-radius: 2px;
-  pointer-events: none;
-  view-transition-name: none;
-  box-shadow: 0 0 8px rgba(99, 102, 241, 0.5);
+.column-ghost {
+  border: 2px dashed #6366f1;
+  border-radius: 12px;
+  background: rgba(99, 102, 241, 0.05);
   flex-shrink: 0;
-  align-self: stretch;
+  box-sizing: border-box;
 }
+
+.column input, .column textarea { user-select: text; }
 
 .column-header {
   display: flex;
   align-items: center;
   gap: 8px;
   margin-bottom: 12px;
-}
-
-.drag-handle {
-  color: #475569;
-  font-size: 0.75rem;
   cursor: grab;
-  user-select: none;
-  line-height: 1;
 }
-
-.drag-handle:active { cursor: grabbing; }
 
 .column-header h2 {
   font-size: 0.8rem;
@@ -463,21 +454,21 @@ body {
   align-items: center;
   cursor: grab;
   transition: border-color 0.15s;
+  user-select: none;
 }
 
 .card:hover { border-color: #475569; }
-.card[data-kanban-dragging] { opacity: 0.5; }
-.card[data-kanban-dropping] { z-index: 10; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3); }
+.card[data-kanban-dragging],
+.card[data-kanban-hold] { opacity: 0.5; z-index: 100; }
+.card[data-kanban-dropping] { position: relative; z-index: 50; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3); }
 .card span { font-size: 0.9rem; word-break: break-word; }
 
-.drop-indicator {
-  height: 3px;
-  background: #6366f1;
-  border-radius: 2px;
-  pointer-events: none;
-  view-transition-name: none;
-  box-shadow: 0 0 8px rgba(99, 102, 241, 0.5);
+.card-ghost {
+  border: 2px dashed #6366f1;
+  border-radius: 8px;
+  background: rgba(99, 102, 241, 0.08);
   flex-shrink: 0;
+  box-sizing: border-box;
 }
 
 .delete-btn {
