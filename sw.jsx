@@ -1,5 +1,6 @@
 /** @jsxImportSource hono/jsx */
 import { Hono } from 'hono'
+import { streamSSE } from 'hono/streaming'
 import { openDB } from 'idb'
 import { raw } from 'hono/html'
 
@@ -42,9 +43,12 @@ function flattenJsx(jsx) {
   return jsx.toString().replace(/\n\s*/g, ' ').replace(/\s{2,}/g, ' ').trim()
 }
 
-function sseEvent(selector, jsx, mode = 'outer') {
+function dsePatch(selector, jsx, mode = 'outer') {
   const html = flattenJsx(jsx)
-  return `event: datastar-patch-elements\ndata: mode ${mode}\ndata: selector ${selector}\ndata: elements ${html}\n\n`
+  return {
+    event: 'datastar-patch-elements',
+    data: `mode ${mode}\nselector ${selector}\nelements ${html}`,
+  }
 }
 
 // --- Components ---
@@ -85,8 +89,11 @@ function Column({ col, cards }) {
     `evt.preventDefault()`,
     `evt.currentTarget.classList.remove('drag-over')`,
     `const cardId = evt.dataTransfer.getData('cardId')`,
+    `const cards = evt.currentTarget.querySelectorAll('.card')`,
+    `let pos = cards.length`,
+    `for (let i = 0; i < cards.length; i++) { const rect = cards[i].getBoundingClientRect(); if (evt.clientY < rect.top + rect.height / 2) { pos = i; break } }`,
     `$dropColumnId = '${col.id}'`,
-    `$dropPosition = 0`,
+    `$dropPosition = pos`,
     `@put('/cards/' + cardId + '/move')`,
   ].join('; ')
 
@@ -109,7 +116,7 @@ function Column({ col, cards }) {
       </div>
       <form
         class="add-form"
-        data-on:submit__prevent__viewtransition={`@post('/columns/${col.id}/cards', {contentType: 'form'})`}
+        data-on:submit__prevent__viewtransition={`@post('/columns/${col.id}/cards', {contentType: 'form'}); evt.target.reset()`}
       >
         <input name="title" type="text" placeholder="Add a card..." autocomplete="off" />
         <button type="submit">+</button>
@@ -301,16 +308,15 @@ function Shell() {
         </main>
         <script>{raw(`
           if (navigator.serviceWorker) {
-            // When a new SW takes control, reload to pick up shell changes (CSS, scripts).
-            // Board content updates are handled automatically via SSE reconnection.
             navigator.serviceWorker.addEventListener('controllerchange', () => {
               window.location.reload();
             });
-            // Periodically check for updates (every 60s in dev, could be longer in prod)
             navigator.serviceWorker.ready.then(reg => {
               setInterval(() => reg.update(), 60 * 1000);
             });
           }
+          // Prevent browser from evicting IndexedDB under storage pressure
+          navigator.storage?.persist?.();
         `)}</script>
       </body>
     </html>
@@ -326,42 +332,23 @@ app.get('/', async (c) => {
   await seed()
 
   if (c.req.header('Datastar-Request') === 'true') {
-    const encoder = new TextEncoder()
-    let handler
-
-    const body = new ReadableStream({
-      async start(controller) {
-        handler = async () => {
-          try {
-            const { columns, cards } = await getBoard()
-            controller.enqueue(
-              encoder.encode(sseEvent('#board', <Board columns={columns} cards={cards} />))
-            )
-          } catch (e) {
-            console.error('[SW] Board update error:', e)
-            events.removeEventListener('boardChanged', handler)
-          }
-        }
-
-        events.addEventListener('boardChanged', handler)
-
-        // Initial render — patch into app shell
+    return streamSSE(c, async (stream) => {
+      const pushBoard = async (selector, mode) => {
         const { columns, cards } = await getBoard()
-        controller.enqueue(
-          encoder.encode(sseEvent('#app', <Board columns={columns} cards={cards} />, 'inner'))
-        )
-      },
-      cancel() {
-        events.removeEventListener('boardChanged', handler)
-      },
-    })
+        await stream.writeSSE(dsePatch(selector, <Board columns={columns} cards={cards} />, mode))
+      }
 
-    return new Response(body, {
-      headers: {
-        'Content-Type': 'text/event-stream',
-        'Cache-Control': 'no-cache',
-        'Connection': 'keep-alive',
-      },
+      const handler = () => pushBoard('#board', 'outer')
+      events.addEventListener('boardChanged', handler)
+      stream.onAbort(() => events.removeEventListener('boardChanged', handler))
+
+      // Initial render — patch into app shell
+      await pushBoard('#app', 'inner')
+
+      // Keep stream open until client disconnects
+      while (!stream.closed) {
+        await stream.sleep(30000)
+      }
     })
   }
 
