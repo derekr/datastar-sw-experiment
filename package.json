@@ -7,9 +7,9 @@
     "build": "vite build"
   },
   "dependencies": {
-    "@remix-run/fetch-router": "^0.6.0"
+    "@remix-run/fetch-router": "^0.17.0"
   },
   "devDependencies": {
-    "vite": "^5.4.11"
+    "vite": "^8.0.0-beta.16"
   }
 }

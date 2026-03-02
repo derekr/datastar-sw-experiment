@@ -1,4 +1,5 @@
-import { createRouter, route, html } from '@remix-run/fetch-router';
+import { createRouter } from '@remix-run/fetch-router';
+import { route } from '@remix-run/fetch-router/routes';
 
 let counter = 0;
 const eventTarget = new EventTarget();
@@ -55,7 +56,7 @@ router.get(routes.home, ({ request }) => {
     });
   }
   
-  return html(`
+  return new Response(`
     <!DOCTYPE html>
     <html>
       <head>
@@ -68,7 +69,7 @@ router.get(routes.home, ({ request }) => {
         <button data-on-click="@post('${routes.increment.href()}')">Increment</button>
       </body>
     </html>
-  `);
+  `, { headers: { 'Content-Type': 'text/html' } });
 });
 
 router.post(routes.increment, () => {
