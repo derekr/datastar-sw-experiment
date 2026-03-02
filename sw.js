@@ -29,9 +29,10 @@ router.get(routes.home, async ({ request }) => {
   if (isDatastarRequest) {
     console.log('[SW] Opening SSE connection for counter:', counter);
     const encoder = new TextEncoder();
+    let handler;
     const stream = new ReadableStream({
       start(controller) {
-        const handler = async () => {
+        handler = async () => {
           try {
             const db = await dbPromise;
             const current = (await db.get('state', 'counter')) ?? 0;
@@ -55,7 +56,8 @@ router.get(routes.home, async ({ request }) => {
         console.log('[SW] Initial app content sent, counter:', counter);
       },
       cancel() {
-        console.log('[SW] SSE connection cancelled');
+        eventTarget.removeEventListener('increment', handler);
+        console.log('[SW] SSE connection cancelled, listener cleaned up');
       }
     });
 
@@ -77,7 +79,7 @@ router.get(routes.home, async ({ request }) => {
       </head>
       <body>
         <h1>Datastar Service Worker Demo</h1>
-        <main id="app" data-init="@get('${routes.home.href()}')">
+        <main id="app" data-init="@get('${routes.home.href()}', { retry: 'always', retryMaxCount: 1000 })">
           <p>Loading...</p>
         </main>
       </body>
