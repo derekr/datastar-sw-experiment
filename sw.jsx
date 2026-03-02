@@ -676,6 +676,9 @@ body {
   padding: 16px;
 }
 
+/* Hide "No cards yet" when a drag ghost is in the same container */
+.cards-container:has(.card-ghost) .empty { display: none; }
+
 .card {
   background: #0f172a;
   border: 1px solid #334155;
@@ -837,20 +840,22 @@ function Shell({ path, children }) {
           }
           navigator.storage?.persist?.();
 
-          // Initialize eg-kanban when #board appears (after first SSE morph)
+          // Initialize eg-kanban when #board appears.
+          // Runs on mutations (SSE morph) AND immediately for pre-rendered content.
           var kanbanCleanup = null;
-          var boardObserver = new MutationObserver(function() {
+          function checkKanban() {
             var board = document.getElementById('board');
             if (board && !kanbanCleanup && window.initKanban) {
               kanbanCleanup = window.initKanban(board);
             }
-            // Clean up if board is removed (navigated away)
             if (!board && kanbanCleanup) {
               kanbanCleanup();
               kanbanCleanup = null;
             }
-          });
+          }
+          var boardObserver = new MutationObserver(checkKanban);
           boardObserver.observe(document.getElementById('app'), { childList: true, subtree: true });
+          checkKanban();
 
           // Drag-and-drop uses raw fetch() instead of Datastar @put actions.
           // eg-kanban.js emits CustomEvents on drop — wiring those into
