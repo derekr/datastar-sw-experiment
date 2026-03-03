@@ -713,11 +713,21 @@ function BoardsList({ boards }) {
         </form>
       </div>
       <div class="boards-toolbar">
-        <a href={`${base()}export`} class="toolbar-btn" download="kanban-export.json">Export</a>
+        <button class="toolbar-btn" id="export-btn">Export</button>
         <button class="toolbar-btn" id="import-btn">Import</button>
         <input type="file" id="import-file" accept=".json" style="display:none" />
       </div>
       <script>{raw(`
+        document.getElementById('export-btn').addEventListener('click', async function() {
+          var resp = await fetch('${base()}export');
+          var blob = await resp.blob();
+          var url = URL.createObjectURL(blob);
+          var a = document.createElement('a');
+          a.href = url;
+          a.download = 'kanban-export.json';
+          a.click();
+          URL.revokeObjectURL(url);
+        });
         document.getElementById('import-btn').addEventListener('click', function() {
           document.getElementById('import-file').click();
         });
