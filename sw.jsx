@@ -758,18 +758,27 @@ body {
   font-family: system-ui, -apple-system, sans-serif;
   background: #0f172a;
   color: #e2e8f0;
-  min-height: 100vh;
+  min-height: 100dvh;
+  -webkit-text-size-adjust: 100%;
 }
 
 /* ── Boards list ─────────────────────────────────────── */
 
-#boards-list { padding: 24px; max-width: 800px; margin: 0 auto; }
-#boards-list h1 { font-size: 1.5rem; font-weight: 600; margin-bottom: 24px; }
+#boards-list {
+  padding: clamp(12px, 4vw, 24px);
+  max-width: 800px;
+  margin: 0 auto;
+}
+#boards-list h1 {
+  font-size: clamp(1.25rem, 1rem + 1vw, 1.5rem);
+  font-weight: 600;
+  margin-bottom: clamp(16px, 3vw, 24px);
+}
 
 .boards-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-  gap: 16px;
+  grid-template-columns: repeat(auto-fill, minmax(min(200px, 100%), 1fr));
+  gap: clamp(10px, 2vw, 16px);
 }
 
 .board-card {
@@ -782,25 +791,29 @@ body {
 .board-card:hover { border-color: #6366f1; }
 .board-card-link {
   display: block;
-  padding: 20px;
+  padding: clamp(14px, 3vw, 20px);
   text-decoration: none;
   color: inherit;
   cursor: pointer;
 }
 .board-card h2 { font-size: 1rem; font-weight: 600; margin-bottom: 8px; }
-.board-meta { font-size: 0.8rem; color: #64748b; display: flex; gap: 6px; }
+.board-meta { font-size: 0.8rem; color: #64748b; display: flex; gap: 6px; flex-wrap: wrap; }
 
 .board-delete-btn {
   position: absolute;
-  top: 12px;
-  right: 12px;
+  top: 8px;
+  right: 8px;
   background: none;
   border: none;
   color: #475569;
   cursor: pointer;
   font-size: 1.1rem;
   line-height: 1;
-  padding: 2px 4px;
+  padding: 6px 8px;
+  min-width: 44px;
+  min-height: 44px;
+  display: grid;
+  place-items: center;
 }
 .board-delete-btn:hover { color: #ef4444; }
 
@@ -808,7 +821,7 @@ body {
   background: transparent;
   border: 2px dashed #334155;
   border-radius: 12px;
-  padding: 20px;
+  padding: clamp(14px, 3vw, 20px);
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -817,9 +830,9 @@ body {
   background: #0f172a;
   border: 1px solid #334155;
   border-radius: 6px;
-  padding: 8px 10px;
+  padding: 10px;
   color: #e2e8f0;
-  font-size: 0.85rem;
+  font-size: 0.875rem;
 }
 .board-new input::placeholder { color: #475569; }
 .board-new input:focus { outline: none; border-color: #6366f1; }
@@ -828,26 +841,27 @@ body {
   border: none;
   border-radius: 6px;
   color: #fff;
-  padding: 8px 14px;
+  padding: 10px 14px;
   cursor: pointer;
-  font-size: 0.85rem;
+  font-size: 0.875rem;
   font-weight: 600;
 }
 .board-new button:hover { background: #4f46e5; }
 
 .boards-toolbar {
-  margin-top: 24px;
+  margin-top: clamp(16px, 3vw, 24px);
   display: flex;
   gap: 8px;
   justify-content: center;
+  flex-wrap: wrap;
 }
 .toolbar-btn {
   background: #1e293b;
   color: #94a3b8;
   border: 1px solid #334155;
   border-radius: 6px;
-  padding: 6px 16px;
-  font-size: 0.85rem;
+  padding: 8px 16px;
+  font-size: 0.875rem;
   cursor: pointer;
   text-decoration: none;
   transition: background 0.15s, color 0.15s;
@@ -859,10 +873,14 @@ body {
 .board-header {
   display: flex;
   align-items: center;
-  gap: 16px;
-  margin-bottom: 24px;
+  gap: clamp(8px, 2vw, 16px);
+  margin-bottom: clamp(12px, 3vw, 24px);
+  flex-wrap: wrap;
 }
-.board-header h1 { font-size: 1.5rem; font-weight: 600; }
+.board-header h1 {
+  font-size: clamp(1.125rem, 1rem + 1vw, 1.5rem);
+  font-weight: 600;
+}
 .back-link {
   color: #6366f1;
   text-decoration: none;
@@ -871,21 +889,27 @@ body {
 }
 .back-link:hover { text-decoration: underline; }
 
-#board { padding: 24px; }
+#board { padding: clamp(8px, 2vw, 24px); }
 
 .columns {
   display: flex;
-  gap: 16px;
+  gap: clamp(10px, 2vw, 16px);
   overflow-x: auto;
-  padding: 0 24px 16px 24px;
+  /* Let columns scroll edge-to-edge; padding on scroll container
+     so first/last column aren't flush against the viewport edge. */
+  padding: 0 clamp(8px, 2vw, 24px) 16px;
   align-items: flex-start;
+  /* Momentum scrolling on iOS */
+  -webkit-overflow-scrolling: touch;
 }
 
 .column {
   background: #1e293b;
   border-radius: 12px;
-  padding: 16px;
-  min-width: 300px;
+  padding: clamp(10px, 2vw, 16px);
+  /* Fluid column width: 85vw on phones, capped at 300px on wider screens */
+  width: clamp(260px, 75vw, 300px);
+  min-width: clamp(260px, 75vw, 300px);
   max-width: 300px;
   flex-shrink: 0;
   user-select: none;
@@ -930,7 +954,11 @@ body {
   color: #475569;
   cursor: pointer;
   font-size: 0.9rem;
-  padding: 0 4px;
+  padding: 6px;
+  min-width: 44px;
+  min-height: 44px;
+  display: grid;
+  place-items: center;
   line-height: 1;
   transition: color 0.15s;
 }
@@ -954,8 +982,6 @@ body {
   padding: 4px;
   transition: background 0.15s, box-shadow 0.15s;
 }
-
-
 
 .empty {
   color: #475569;
@@ -996,7 +1022,8 @@ body {
 
 .card-edit-btn {
   background: none; border: none; color: #475569; cursor: pointer;
-  font-size: 0.9rem; padding: 0 4px; line-height: 1; transition: color 0.15s;
+  font-size: 0.9rem; padding: 6px; min-width: 44px; min-height: 44px;
+  display: grid; place-items: center; line-height: 1; transition: color 0.15s;
 }
 .card-edit-btn:hover { color: #6366f1; }
 
@@ -1006,13 +1033,13 @@ body {
 .card-edit-form input,
 .card-edit-form textarea {
   background: #1e293b; color: #e2e8f0; border: 1px solid #334155; border-radius: 6px;
-  padding: 6px 8px; font-size: 0.85rem; font-family: inherit; resize: vertical;
+  padding: 8px 10px; font-size: 0.875rem; font-family: inherit; resize: vertical;
 }
 .card-edit-form input:focus,
 .card-edit-form textarea:focus { outline: none; border-color: #6366f1; }
 .card-edit-actions { display: flex; gap: 6px; }
 .card-edit-actions button {
-  padding: 4px 12px; border-radius: 6px; border: 1px solid #334155; cursor: pointer;
+  padding: 8px 14px; border-radius: 6px; border: 1px solid #334155; cursor: pointer;
   font-size: 0.8rem; transition: background 0.15s;
 }
 .card-edit-actions button[type="submit"] { background: #6366f1; color: #fff; border-color: #6366f1; }
@@ -1032,13 +1059,20 @@ body {
 #board[data-kanban-active] .column,
 #board[data-kanban-active] .card { view-transition-name: none !important; }
 
+/* Suppress text selection on everything during drag */
+#board[data-kanban-active] { user-select: none; -webkit-user-select: none; }
+
 .delete-btn {
   background: none;
   border: none;
   color: #475569;
   cursor: pointer;
   font-size: 1.1rem;
-  padding: 0 4px;
+  padding: 6px;
+  min-width: 44px;
+  min-height: 44px;
+  display: grid;
+  place-items: center;
   flex-shrink: 0;
   line-height: 1;
   transition: color 0.15s;
@@ -1054,12 +1088,13 @@ body {
 
 .add-form input {
   flex: 1;
+  min-width: 0;
   background: #0f172a;
   border: 1px solid #334155;
   border-radius: 6px;
-  padding: 8px 10px;
+  padding: 10px;
   color: #e2e8f0;
-  font-size: 0.85rem;
+  font-size: 0.875rem;
 }
 
 .add-form input::placeholder { color: #475569; }
@@ -1070,7 +1105,7 @@ body {
   border: none;
   border-radius: 6px;
   color: #fff;
-  padding: 8px 14px;
+  padding: 10px 14px;
   cursor: pointer;
   font-size: 1rem;
   font-weight: 600;
@@ -1083,7 +1118,8 @@ body {
   display: flex;
   gap: 8px;
   margin-top: 16px;
-  padding: 0 24px;
+  padding: 0 clamp(8px, 2vw, 24px);
+  flex-wrap: wrap;
 }
 
 .add-col-form input {
@@ -1092,8 +1128,9 @@ body {
   border-radius: 8px;
   padding: 10px 14px;
   color: #e2e8f0;
-  font-size: 0.85rem;
-  width: 200px;
+  font-size: 0.875rem;
+  flex: 1;
+  min-width: 0;
 }
 
 .add-col-form input::placeholder { color: #475569; }
@@ -1106,7 +1143,7 @@ body {
   color: #e2e8f0;
   padding: 10px 16px;
   cursor: pointer;
-  font-size: 0.85rem;
+  font-size: 0.875rem;
   font-weight: 600;
   white-space: nowrap;
   transition: background 0.15s;
@@ -1252,9 +1289,9 @@ body {
   font-family: ui-monospace, 'Cascadia Code', 'Source Code Pro', Menlo, Consolas, monospace;
   background: #0f172a;
   color: #e2e8f0;
-  padding: 24px;
-  min-height: 100vh;
-  font-size: 14px;
+  padding: clamp(12px, 4vw, 24px);
+  min-height: 100dvh;
+  font-size: 0.875rem;
 }
 
 a { color: #818cf8; }
