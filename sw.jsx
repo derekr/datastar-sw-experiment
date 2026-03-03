@@ -418,8 +418,10 @@ function Card({ card }) {
   return (
     <div
       class="card"
+      id={`card-${card.id}`}
       data-card-id={card.id}
-      style={`view-transition-name: card-${card.id}; touch-action: none`}
+      tabindex="0"
+      style="touch-action: none"
     >
       <span>{card.title}</span>
       <button
@@ -441,9 +443,9 @@ function Column({ col, cards, columnCount }) {
     <div
       class="column"
       id={`column-${col.id}`}
-      style={`view-transition-name: col-${col.id}; touch-action: none`}
+      style={`view-transition-name: col-${col.id}; view-transition-class: col; touch-action: none`}
     >
-      <div class="column-header">
+      <div class="column-header" tabindex="0">
         <h2>{col.title}</h2>
         <span class="count">{colCards.length}</span>
         {columnCount > 1 && (
@@ -672,6 +674,8 @@ body {
   cursor: grab;
 }
 
+.column-header:focus-visible { outline: none; box-shadow: 0 0 0 2px #6366f1; border-radius: 6px; }
+
 .column-header h2 {
   font-size: 0.8rem;
   text-transform: uppercase;
@@ -716,9 +720,11 @@ body {
 
 .empty {
   color: #475569;
-  font-size: 0.85rem;
+  font-size: 0.9rem;
   text-align: center;
-  padding: 16px;
+  padding: 10px 12px;
+  border: 1px solid transparent;
+  border-radius: 8px;
 }
 
 /* Hide "No cards yet" when a drag ghost is in the same container */
@@ -738,6 +744,7 @@ body {
 }
 
 .card:hover { border-color: #475569; }
+.card:focus-visible { outline: none; box-shadow: 0 0 0 2px #6366f1; }
 .card[data-kanban-dragging],
 .card[data-kanban-hold] { opacity: 0.5; z-index: 100; }
 .card[data-kanban-dropping] { position: relative; z-index: 50; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3); }
@@ -751,7 +758,7 @@ body {
   box-sizing: border-box;
 }
 
-/* During drag, suppress VTN so no stacking contexts trap the fixed-position element */
+/* During pointer drag, suppress ALL VTNs — drag itself provides visual feedback */
 #board[data-kanban-active] .column,
 #board[data-kanban-active] .card { view-transition-name: none !important; }
 
@@ -846,6 +853,8 @@ body {
 }
 ::view-transition-old(*) { animation: none; opacity: 0; }
 ::view-transition-new(*) { animation: none; }
+/* Columns above default during view transitions so moving column renders on top */
+::view-transition-group(*.col) { z-index: 50; }
 
 /* body cursor during drag (set by eg-kanban) */
 body[style*="cursor: grabbing"] * { cursor: grabbing !important; }
@@ -902,13 +911,29 @@ function Shell({ path, children }) {
           boardObserver.observe(document.getElementById('app'), { childList: true, subtree: true });
           checkKanban();
 
-          // Drag-and-drop uses raw fetch() instead of Datastar @put actions.
-          // eg-kanban.js emits CustomEvents on drop — wiring those into
-          // Datastar expressions would be awkward. The SSE morph from the
-          // SW handles the UI update; these are fire-and-forget commands.
+          // Drag-and-drop and keyboard moves use raw fetch() to SW routes.
+          // eg-kanban.js emits CustomEvents — the SSE morph handles UI updates.
+
+          // Focus restoration after SSE morph: save the focused element's
+          // identity before the morph replaces the DOM, then re-focus it.
+          var pendingFocus = null;
+          var focusObserver = new MutationObserver(function() {
+            if (!pendingFocus) return;
+            var el = null;
+            if (pendingFocus.cardId) {
+              el = document.querySelector('[data-card-id="' + pendingFocus.cardId + '"]');
+            } else if (pendingFocus.columnId) {
+              var col = document.getElementById('column-' + pendingFocus.columnId);
+              if (col) el = col.querySelector('.column-header');
+            }
+            if (el) { el.focus({ preventScroll: false }); pendingFocus = null; }
+          });
+          focusObserver.observe(document.getElementById('app'), { childList: true, subtree: true });
+
           document.getElementById('app').addEventListener('kanban-card-drag-end', function(e) {
             var d = e.detail;
             if (!d.columnId || !d.cardId) return;
+            pendingFocus = { cardId: d.cardId };
             fetch('/cards/' + d.cardId + '/move', {
               method: 'PUT',
               headers: { 'Content-Type': 'application/json' },
@@ -916,10 +941,10 @@ function Shell({ path, children }) {
             });
           });
 
-          // Column drop → PUT to SW
           document.getElementById('app').addEventListener('kanban-column-drag-end', function(e) {
             var d = e.detail;
             if (!d.columnId) return;
+            pendingFocus = { columnId: d.columnId };
             fetch('/columns/' + d.columnId + '/move', {
               method: 'PUT',
               headers: { 'Content-Type': 'application/json' },

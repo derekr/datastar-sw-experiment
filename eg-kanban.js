@@ -636,9 +636,165 @@
 
     // ── Keyboard ──────────────────────────────────────────────────────────
 
+    // Map vim keys to arrow directions
+    var VIM_MAP = { h: 'Left', j: 'Down', k: 'Up', l: 'Right' }
+
+    function directionFor(key) {
+      if (key.startsWith('Arrow')) return key.slice(5) // ArrowUp → Up
+      return VIM_MAP[key] || null
+    }
+
+    function getAllCards() {
+      return Array.from(boardEl.querySelectorAll('.card'))
+    }
+
+    function getColumnHeaders() {
+      return Array.from(boardEl.querySelectorAll('.column-header'))
+    }
+
+    function getCardsInColumn(colEl) {
+      var container = colEl.querySelector('.cards-container')
+      return container ? Array.from(container.querySelectorAll('.card')) : []
+    }
+
+    function focusCard(card) {
+      if (card) card.focus({ preventScroll: false })
+    }
+
+    function navigateFromCard(card, dir) {
+      var colEl = getColumnEl(card)
+      if (!colEl) return
+      var cards = getCardsInColumn(colEl)
+      var idx = cards.indexOf(card)
+      var columns = getColumns()
+      var colIdx = columns.indexOf(colEl)
+
+      if (dir === 'Up' || dir === 'Down') {
+        var next = dir === 'Down' ? idx + 1 : idx - 1
+        if (next >= 0 && next < cards.length) {
+          focusCard(cards[next])
+        } else if (dir === 'Down' && colIdx < columns.length - 1) {
+          // Wrap to first card of next column
+          var nextCards = getCardsInColumn(columns[colIdx + 1])
+          if (nextCards.length) focusCard(nextCards[0])
+        } else if (dir === 'Up' && colIdx > 0) {
+          // Wrap to last card of previous column
+          var prevCards = getCardsInColumn(columns[colIdx - 1])
+          if (prevCards.length) focusCard(prevCards[prevCards.length - 1])
+        } else if (dir === 'Up') {
+          // At top of first column — focus the column header
+          var header = colEl.querySelector('.column-header')
+          if (header) header.focus()
+        }
+      } else {
+        // Left/Right: jump to same-index card in adjacent column
+        var adj = dir === 'Right' ? colIdx + 1 : colIdx - 1
+        if (adj >= 0 && adj < columns.length) {
+          var adjCards = getCardsInColumn(columns[adj])
+          var target = Math.min(idx, adjCards.length - 1)
+          if (adjCards.length) {
+            focusCard(adjCards[target])
+          } else {
+            // Empty column — focus its header
+            var h = columns[adj].querySelector('.column-header')
+            if (h) h.focus()
+          }
+        }
+      }
+    }
+
+    function navigateFromHeader(header, dir) {
+      var colEl = header.closest('.column')
+      var columns = getColumns()
+      var colIdx = columns.indexOf(colEl)
+
+      if (dir === 'Left' || dir === 'Right') {
+        var adj = dir === 'Right' ? colIdx + 1 : colIdx - 1
+        if (adj >= 0 && adj < columns.length) {
+          var h = columns[adj].querySelector('.column-header')
+          if (h) h.focus()
+        }
+      } else if (dir === 'Down') {
+        // Focus first card in this column
+        var cards = getCardsInColumn(colEl)
+        if (cards.length) focusCard(cards[0])
+      }
+    }
+
+    function moveCard(card, dir) {
+      var colEl = getColumnEl(card)
+      if (!colEl) return
+      var container = colEl.querySelector('.cards-container')
+      if (!container) return
+      var cards = getCardsInColumn(colEl)
+      var idx = cards.indexOf(card)
+      var columns = getColumns()
+      var colIdx = columns.indexOf(colEl)
+
+      if (dir === 'Up' || dir === 'Down') {
+        // Move within column
+        var newIdx = dir === 'Down' ? idx + 1 : idx - 1
+        if (newIdx < 0 || newIdx >= cards.length) return
+        emit('card-drag-end', {
+          cardId: getCardId(card),
+          columnId: getColumnId(colEl),
+          position: newIdx
+        })
+      } else {
+        // Move to adjacent column
+        var adj = dir === 'Right' ? colIdx + 1 : colIdx - 1
+        if (adj < 0 || adj >= columns.length) return
+        var adjCards = getCardsInColumn(columns[adj])
+        // Insert at same index or end
+        var pos = Math.min(idx, adjCards.length)
+        emit('card-drag-end', {
+          cardId: getCardId(card),
+          columnId: getColumnId(columns[adj]),
+          position: pos
+        })
+      }
+    }
+
+    function moveColumn(header, dir) {
+      if (dir !== 'Left' && dir !== 'Right') return
+      var colEl = header.closest('.column')
+      var columns = getColumns()
+      var colIdx = columns.indexOf(colEl)
+      var newIdx = dir === 'Right' ? colIdx + 1 : colIdx - 1
+      if (newIdx < 0 || newIdx >= columns.length) return
+      emit('column-drag-end', {
+        columnId: getColumnId(colEl),
+        position: newIdx
+      })
+    }
+
     function onKeyDown(e) {
       if (e.key === 'Escape' && drag) {
         onPointerCancel(e)
+        return
+      }
+
+      var dir = directionFor(e.key)
+      if (!dir) return
+
+      var focused = document.activeElement
+      if (!focused || !boardEl.contains(focused)) return
+
+      var isCard = focused.classList.contains('card')
+      var isHeader = focused.classList.contains('column-header')
+      if (!isCard && !isHeader) return
+
+      // Ctrl/Meta = move the item, plain = navigate focus
+      if (e.ctrlKey || e.metaKey) {
+        e.preventDefault()
+        if (isCard) moveCard(focused, dir)
+        else if (isHeader) moveColumn(focused, dir)
+      } else {
+        // Don't hijack vim keys when typing in an input
+        if (focused.tagName === 'INPUT' || focused.tagName === 'TEXTAREA') return
+        e.preventDefault()
+        if (isCard) navigateFromCard(focused, dir)
+        else if (isHeader) navigateFromHeader(focused, dir)
       }
     }
 
