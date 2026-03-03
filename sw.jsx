@@ -1401,5 +1401,12 @@ self.addEventListener('activate', (event) => event.waitUntil(self.clients.claim(
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url)
   if (url.origin !== self.location.origin) return
-  event.respondWith(app.fetch(event.request))
+  // Strip the SW scope prefix so Hono routes match regardless of base path.
+  // e.g. /datastar-sw-experiment/boards/123 → /boards/123
+  const scope = new URL(self.registration.scope).pathname
+  if (scope !== '/' && url.pathname.startsWith(scope)) {
+    url.pathname = '/' + url.pathname.slice(scope.length)
+  }
+  const req = new Request(url, event.request)
+  event.respondWith(app.fetch(req))
 })
