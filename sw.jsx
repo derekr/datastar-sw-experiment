@@ -26,6 +26,8 @@ const EVENT_VERSIONS = {
   'card.created': 1,
   'card.moved': 1,
   'card.deleted': 1,
+  'card.titleUpdated': 1,
+  'card.descriptionUpdated': 1,
 }
 
 // Upcasters transform old event versions to current during replay.
@@ -122,6 +124,22 @@ async function applyEvent(event, tx) {
       break
     }
 
+    case 'card.titleUpdated': {
+      const store = tx.objectStore('cards')
+      const card = await store.get(data.id)
+      if (!card) break
+      await store.put({ ...card, title: data.title })
+      break
+    }
+
+    case 'card.descriptionUpdated': {
+      const store = tx.objectStore('cards')
+      const card = await store.get(data.id)
+      if (!card) break
+      await store.put({ ...card, description: data.description })
+      break
+    }
+
     case 'card.deleted':
       await tx.objectStore('cards').delete(data.id)
       break
@@ -170,9 +188,16 @@ async function boardIdForEvent(event, tx) {
   if (type.startsWith('board.')) return data.id
   if (data.boardId) return data.boardId
   // Card events: look up column → boardId
-  if (type.startsWith('card.') && data.columnId) {
-    const col = await tx.objectStore('columns').get(data.columnId)
-    return col?.boardId || null
+  if (type.startsWith('card.')) {
+    let columnId = data.columnId
+    if (!columnId && data.id) {
+      const card = await tx.objectStore('cards').get(data.id)
+      columnId = card?.columnId
+    }
+    if (columnId) {
+      const col = await tx.objectStore('columns').get(columnId)
+      return col?.boardId || null
+    }
   }
   // column.moved/deleted: look up column directly
   if (type.startsWith('column.') && data.id) {
@@ -212,6 +237,137 @@ async function appendEvents(events) {
 
 async function appendEvent(event) {
   return appendEvents([event])
+}
+
+// --- Undo / Redo ---
+// Per-board undo/redo stacks. Each entry is an array of events to reverse/replay.
+// Mutations push { undo: [reverseEvents], redo: [originalEvents] } onto undoStack.
+// Undo pops undoStack, appends undo events, pushes to redoStack.
+// Redo pops redoStack, appends redo events, pushes to undoStack.
+
+const MAX_UNDO = 50
+const undoStacks = new Map() // boardId → [{ undo: [...], redo: [...] }]
+const redoStacks = new Map() // boardId → [{ undo: [...], redo: [...] }]
+
+function getStack(map, boardId) {
+  if (!map.has(boardId)) map.set(boardId, [])
+  return map.get(boardId)
+}
+
+// Build reverse events for a set of forward events.
+// Must be called BEFORE the forward events are applied (needs old state).
+async function buildUndoEntry(events) {
+  const db = await dbPromise
+  const undoEvents = []
+  const redoEvents = []
+
+  for (const evt of events) {
+    const { type, data } = evt
+    switch (type) {
+      case 'card.created':
+        undoEvents.push({ type: 'card.deleted', data: { id: data.id } })
+        redoEvents.push({ type: 'card.created', data: { ...data } })
+        break
+
+      case 'card.deleted': {
+        const card = await db.get('cards', data.id)
+        if (card) {
+          undoEvents.push({ type: 'card.created', data: { ...card } })
+          redoEvents.push({ type: 'card.deleted', data: { id: data.id } })
+        }
+        break
+      }
+
+      case 'card.moved': {
+        const card = await db.get('cards', data.id)
+        if (card) {
+          undoEvents.push({ type: 'card.moved', data: { id: data.id, columnId: card.columnId, position: card.position } })
+          redoEvents.push({ type: 'card.moved', data: { ...data } })
+        }
+        break
+      }
+
+      case 'card.titleUpdated': {
+        const card = await db.get('cards', data.id)
+        if (card) {
+          undoEvents.push({ type: 'card.titleUpdated', data: { id: data.id, title: card.title } })
+          redoEvents.push({ type: 'card.titleUpdated', data: { ...data } })
+        }
+        break
+      }
+
+      case 'card.descriptionUpdated': {
+        const card = await db.get('cards', data.id)
+        if (card) {
+          undoEvents.push({ type: 'card.descriptionUpdated', data: { id: data.id, description: card.description || '' } })
+          redoEvents.push({ type: 'card.descriptionUpdated', data: { ...data } })
+        }
+        break
+      }
+
+      case 'column.created':
+        undoEvents.push({ type: 'column.deleted', data: { id: data.id } })
+        redoEvents.push({ type: 'column.created', data: { ...data } })
+        break
+
+      case 'column.deleted': {
+        const col = await db.get('columns', data.id)
+        if (col) {
+          // Also snapshot cards in this column so undo restores them
+          const colCards = await db.getAllFromIndex('cards', 'byColumn', data.id)
+          undoEvents.push({ type: 'column.created', data: { ...col } })
+          for (const card of colCards) {
+            undoEvents.push({ type: 'card.created', data: { ...card } })
+          }
+          redoEvents.push({ type: 'column.deleted', data: { id: data.id } })
+        }
+        break
+      }
+
+      case 'column.moved': {
+        const col = await db.get('columns', data.id)
+        if (col) {
+          undoEvents.push({ type: 'column.moved', data: { id: data.id, position: col.position } })
+          redoEvents.push({ type: 'column.moved', data: { ...data } })
+        }
+        break
+      }
+
+      case 'board.created':
+        undoEvents.push({ type: 'board.deleted', data: { id: data.id } })
+        redoEvents.push({ type: 'board.created', data: { ...data } })
+        break
+
+      case 'board.deleted': {
+        const board = await db.get('boards', data.id)
+        if (board) {
+          undoEvents.push({ type: 'board.created', data: { ...board } })
+          redoEvents.push({ type: 'board.deleted', data: { id: data.id } })
+        }
+        break
+      }
+    }
+  }
+
+  return undoEvents.length > 0 ? { undo: undoEvents, redo: redoEvents } : null
+}
+
+// Wrap appendEvents to auto-push undo entries.
+// isUndoRedo flag prevents undo/redo actions from pushing onto the stacks recursively.
+async function appendEventsWithUndo(events, boardId, { isUndoRedo = false } = {}) {
+  if (!isUndoRedo && boardId) {
+    const entry = await buildUndoEntry(events)
+    if (entry) {
+      const stack = getStack(undoStacks, boardId)
+      stack.push(entry)
+      if (stack.length > MAX_UNDO) stack.shift()
+      // Clear redo stack on new mutation
+      redoStacks.set(boardId, [])
+    }
+  }
+  await appendEvents(events.map(e =>
+    e.id ? e : createEvent(e.type, e.data)
+  ))
 }
 
 // Nuclear rebuild: clear projection, replay all events in order.
@@ -423,6 +579,7 @@ function dsePatch(selector, jsx, mode = 'outer', { useViewTransition = false } =
 // --- Components ---
 
 function Card({ card }) {
+  const desc = card.description || ''
   return (
     <div
       class="card"
@@ -431,13 +588,35 @@ function Card({ card }) {
       tabindex="0"
       style="touch-action: none"
     >
-      <span>{card.title}</span>
-      <button
-        class="delete-btn"
-        data-on:click__viewtransition={`@delete('${base()}cards/${card.id}')`}
+      <div class="card-content">
+        <span class="card-title">{card.title}</span>
+        {desc && <p class="card-desc">{desc}</p>}
+      </div>
+      <div class="card-actions">
+        <button
+          class="card-edit-btn"
+          data-on:click={`$editingCard = $editingCard === '${card.id}' ? '' : '${card.id}'`}
+          title="Edit"
+        >&#9998;</button>
+        <button
+          class="delete-btn"
+          data-on:click__viewtransition={`@delete('${base()}cards/${card.id}')`}
+        >
+          ×
+        </button>
+      </div>
+      <form
+        class="card-edit-form"
+        data-show={`$editingCard === '${card.id}'`}
+        data-on:submit__prevent={`@put('${base()}cards/${card.id}', {contentType: 'form'}); $editingCard = ''`}
       >
-        ×
-      </button>
+        <input name="title" type="text" value={card.title} placeholder="Title" autocomplete="off" />
+        <textarea name="description" placeholder="Description (optional)" rows="2">{desc}</textarea>
+        <div class="card-edit-actions">
+          <button type="submit">Save</button>
+          <button type="button" data-on:click="$editingCard = ''">Cancel</button>
+        </div>
+      </form>
     </div>
   )
 }
@@ -481,7 +660,7 @@ function Column({ col, cards, columnCount }) {
 
 function Board({ board, columns, cards }) {
   return (
-    <div id="board">
+    <div id="board" data-signals="{editingCard: ''}">
       <div class="board-header">
         <a href={base()} class="back-link">← Boards</a>
         <h1>{board.title}</h1>
@@ -533,6 +712,29 @@ function BoardsList({ boards }) {
           <button type="submit">+ Board</button>
         </form>
       </div>
+      <div class="boards-toolbar">
+        <a href={`${base()}export`} class="toolbar-btn" download="kanban-export.json">Export</a>
+        <button class="toolbar-btn" id="import-btn">Import</button>
+        <input type="file" id="import-file" accept=".json" style="display:none" />
+      </div>
+      <script>{raw(`
+        document.getElementById('import-btn').addEventListener('click', function() {
+          document.getElementById('import-file').click();
+        });
+        document.getElementById('import-file').addEventListener('change', async function(e) {
+          var file = e.target.files[0];
+          if (!file) return;
+          var text = await file.text();
+          var resp = await fetch('${base()}import', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: text
+          });
+          if (resp.ok) window.location.reload();
+          else alert('Import failed: ' + resp.statusText);
+          e.target.value = '';
+        });
+      `)}</script>
     </div>
   )
 }
@@ -622,6 +824,25 @@ body {
   font-weight: 600;
 }
 .board-new button:hover { background: #4f46e5; }
+
+.boards-toolbar {
+  margin-top: 24px;
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+}
+.toolbar-btn {
+  background: #1e293b;
+  color: #94a3b8;
+  border: 1px solid #334155;
+  border-radius: 6px;
+  padding: 6px 16px;
+  font-size: 0.85rem;
+  cursor: pointer;
+  text-decoration: none;
+  transition: background 0.15s, color 0.15s;
+}
+.toolbar-btn:hover { background: #334155; color: #e2e8f0; }
 
 /* ── Board detail ───────────────────────────────────── */
 
@@ -744,8 +965,9 @@ body {
   border-radius: 8px;
   padding: 10px 12px;
   display: flex;
+  flex-wrap: wrap;
   justify-content: space-between;
-  align-items: center;
+  align-items: flex-start;
   cursor: grab;
   transition: border-color 0.15s;
   user-select: none;
@@ -756,7 +978,37 @@ body {
 .card[data-kanban-dragging],
 .card[data-kanban-hold] { opacity: 0.5; z-index: 100; }
 .card[data-kanban-dropping] { position: relative; z-index: 50; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3); }
-.card span { font-size: 0.9rem; word-break: break-word; }
+
+.card-content { flex: 1; min-width: 0; }
+.card-title { font-size: 0.9rem; word-break: break-word; }
+.card-desc { font-size: 0.8rem; color: #94a3b8; margin: 4px 0 0; word-break: break-word; }
+.card-actions { display: flex; gap: 2px; flex-shrink: 0; margin-left: 4px; }
+
+.card-edit-btn {
+  background: none; border: none; color: #475569; cursor: pointer;
+  font-size: 0.9rem; padding: 0 4px; line-height: 1; transition: color 0.15s;
+}
+.card-edit-btn:hover { color: #6366f1; }
+
+.card-edit-form {
+  width: 100%; margin-top: 8px; display: flex; flex-direction: column; gap: 6px;
+}
+.card-edit-form input,
+.card-edit-form textarea {
+  background: #1e293b; color: #e2e8f0; border: 1px solid #334155; border-radius: 6px;
+  padding: 6px 8px; font-size: 0.85rem; font-family: inherit; resize: vertical;
+}
+.card-edit-form input:focus,
+.card-edit-form textarea:focus { outline: none; border-color: #6366f1; }
+.card-edit-actions { display: flex; gap: 6px; }
+.card-edit-actions button {
+  padding: 4px 12px; border-radius: 6px; border: 1px solid #334155; cursor: pointer;
+  font-size: 0.8rem; transition: background 0.15s;
+}
+.card-edit-actions button[type="submit"] { background: #6366f1; color: #fff; border-color: #6366f1; }
+.card-edit-actions button[type="submit"]:hover { background: #4f46e5; }
+.card-edit-actions button[type="button"] { background: #1e293b; color: #94a3b8; }
+.card-edit-actions button[type="button"]:hover { background: #334155; }
 
 .card-ghost {
   border: 2px dashed #6366f1;
@@ -960,6 +1212,20 @@ function Shell({ path, children }) {
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ dropPosition: d.position })
             });
+          });
+
+          // Undo/Redo: Ctrl+Z / Ctrl+Shift+Z (or Cmd on Mac)
+          document.addEventListener('keydown', function(e) {
+            if (!(e.ctrlKey || e.metaKey) || e.key !== 'z') return;
+            // Don't intercept when typing in an input/textarea
+            var tag = (e.target.tagName || '').toLowerCase();
+            if (tag === 'input' || tag === 'textarea') return;
+            e.preventDefault();
+            var boardMatch = location.pathname.match(/boards\\/([^/]+)/);
+            if (!boardMatch) return;
+            var boardId = boardMatch[1];
+            var action = e.shiftKey ? 'redo' : 'undo';
+            fetch('${base()}boards/' + boardId + '/' + action, { method: 'POST' });
           });
         `)}</script>
       </body>
@@ -1270,6 +1536,19 @@ app.post('/boards/:boardId/columns', async (c) => {
   return c.body(null, 204)
 })
 
+// Helper: resolve boardId from a column or card
+async function boardIdFromColumn(columnId) {
+  const db = await dbPromise
+  const col = await db.get('columns', columnId)
+  return col?.boardId || null
+}
+async function boardIdFromCard(cardId) {
+  const db = await dbPromise
+  const card = await db.get('cards', cardId)
+  if (!card) return null
+  return boardIdFromColumn(card.columnId)
+}
+
 // Command: create card
 app.post('/columns/:columnId/cards', async (c) => {
   const columnId = c.req.param('columnId')
@@ -1281,13 +1560,45 @@ app.post('/columns/:columnId/cards', async (c) => {
   const colCards = (await db.getAllFromIndex('cards', 'byColumn', columnId))
     .sort(cmpPosition)
   const lastPos = colCards.length > 0 ? colCards[colCards.length - 1].position : null
+  const boardId = await boardIdFromColumn(columnId)
 
-  await appendEvent(createEvent('card.created', {
+  const evt = createEvent('card.created', {
     id: crypto.randomUUID(),
     columnId,
     title,
     position: generateKeyBetween(lastPos, null),
-  }))
+  })
+  await appendEventsWithUndo([evt], boardId)
+  return c.body(null, 204)
+})
+
+// Command: update card (title/description)
+app.put('/cards/:cardId', async (c) => {
+  const cardId = c.req.param('cardId')
+  const body = await c.req.parseBody()
+
+  const db = await dbPromise
+  const card = await db.get('cards', cardId)
+  if (!card) return c.body(null, 404)
+
+  const correlationId = crypto.randomUUID()
+  const events = []
+
+  const newTitle = String(body.title || '').trim()
+  if (newTitle && newTitle !== card.title) {
+    events.push(createEvent('card.titleUpdated', { id: cardId, title: newTitle }, { correlationId }))
+  }
+
+  const newDesc = (body.description ?? '').trim()
+  const oldDesc = card.description || ''
+  if (newDesc !== oldDesc) {
+    events.push(createEvent('card.descriptionUpdated', { id: cardId, description: newDesc }, { correlationId }))
+  }
+
+  if (events.length > 0) {
+    const boardId = await boardIdFromCard(cardId)
+    await appendEventsWithUndo(events, boardId)
+  }
   return c.body(null, 204)
 })
 
@@ -1308,19 +1619,22 @@ app.put('/cards/:cardId/move', async (c) => {
     .filter(c => c.id !== cardId)
     .sort(cmpPosition)
 
-  await appendEvent(createEvent('card.moved', {
+  const boardId = await boardIdFromCard(cardId)
+  const evt = createEvent('card.moved', {
     id: cardId,
     columnId: targetColumnId,
     position: positionForIndex(dropIndex, siblings),
-  }))
+  })
+  await appendEventsWithUndo([evt], boardId)
   return c.body(null, 204)
 })
 
 // Command: delete column (and its cards)
 app.delete('/columns/:columnId', async (c) => {
-  await appendEvent(createEvent('column.deleted', {
-    id: c.req.param('columnId'),
-  }))
+  const columnId = c.req.param('columnId')
+  const boardId = await boardIdFromColumn(columnId)
+  const evt = createEvent('column.deleted', { id: columnId })
+  await appendEventsWithUndo([evt], boardId)
   return c.body(null, 204)
 })
 
@@ -1340,18 +1654,71 @@ app.put('/columns/:columnId/move', async (c) => {
     .filter(c => c.id !== columnId)
     .sort(cmpPosition)
 
-  await appendEvent(createEvent('column.moved', {
+  const evt = createEvent('column.moved', {
     id: columnId,
     position: positionForIndex(dropIndex, siblings),
-  }))
+  })
+  await appendEventsWithUndo([evt], col.boardId)
   return c.body(null, 204)
 })
 
 // Command: delete card
 app.delete('/cards/:cardId', async (c) => {
-  await appendEvent(createEvent('card.deleted', {
-    id: c.req.param('cardId'),
-  }))
+  const cardId = c.req.param('cardId')
+  const boardId = await boardIdFromCard(cardId)
+  const evt = createEvent('card.deleted', { id: cardId })
+  await appendEventsWithUndo([evt], boardId)
+  return c.body(null, 204)
+})
+
+// Command: undo
+app.post('/boards/:boardId/undo', async (c) => {
+  const boardId = c.req.param('boardId')
+  const stack = getStack(undoStacks, boardId)
+  if (stack.length === 0) return c.body(null, 204)
+  const entry = stack.pop()
+  getStack(redoStacks, boardId).push(entry)
+  await appendEventsWithUndo(
+    entry.undo.map(e => createEvent(e.type, e.data)),
+    boardId,
+    { isUndoRedo: true }
+  )
+  return c.body(null, 204)
+})
+
+// Command: redo
+app.post('/boards/:boardId/redo', async (c) => {
+  const boardId = c.req.param('boardId')
+  const stack = getStack(redoStacks, boardId)
+  if (stack.length === 0) return c.body(null, 204)
+  const entry = stack.pop()
+  getStack(undoStacks, boardId).push(entry)
+  await appendEventsWithUndo(
+    entry.redo.map(e => createEvent(e.type, e.data)),
+    boardId,
+    { isUndoRedo: true }
+  )
+  return c.body(null, 204)
+})
+
+// --- Export / Import ---
+
+app.get('/export', async (c) => {
+  const db = await dbPromise
+  const events = await db.getAll('events')
+  // Strip auto-increment seq key — import will re-assign
+  const cleaned = events.map(({ seq, ...rest }) => rest)
+  return c.newResponse(JSON.stringify(cleaned, null, 2), 200, {
+    'Content-Type': 'application/json',
+    'Content-Disposition': 'attachment; filename="kanban-export.json"',
+  })
+})
+
+app.post('/import', async (c) => {
+  const events = await c.req.json()
+  if (!Array.isArray(events)) return c.text('Expected JSON array', 400)
+  // Replay events through appendEvents — deduplicates by event id
+  await appendEvents(events)
   return c.body(null, 204)
 })
 
