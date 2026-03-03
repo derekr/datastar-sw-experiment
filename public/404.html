@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Redirecting...</title>
+  <script>
+    // GitHub Pages SPA redirect:
+    // When GitHub Pages can't find a file, it serves 404.html.
+    // We store the original path and redirect to the root where
+    // index.html registers the service worker. After the SW installs
+    // and claims the client, the page reloads and the SW intercepts
+    // the deep-link URL.
+    sessionStorage.setItem('spa-redirect', location.pathname + location.search + location.hash);
+    location.replace(location.pathname.split('/').slice(0, 2).join('/') + '/');
+  </script>
+</head>
+<body>
+  <p>Redirecting...</p>
+</body>
+</html>

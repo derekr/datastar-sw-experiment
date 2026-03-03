@@ -22,7 +22,14 @@
         function reloadOnce() {
           if (reloading) return;
           reloading = true;
-          window.location.reload();
+          // If we arrived via 404.html SPA redirect, restore the original URL.
+          const redirect = sessionStorage.getItem('spa-redirect');
+          if (redirect) {
+            sessionStorage.removeItem('spa-redirect');
+            window.location.replace(redirect);
+          } else {
+            window.location.reload();
+          }
         }
 
         // Reload when a new SW takes control
