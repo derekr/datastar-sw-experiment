@@ -2,7 +2,9 @@
 
 A local-first kanban board where the **service worker is the server**. The browser's main thread runs almost no JavaScript — [Datastar](https://data-star.dev) handles UI reactivity, and a [Hono](https://hono.dev) app inside the service worker handles all routing, rendering, persistence, and state management. Data lives in IndexedDB via [idb](https://github.com/nicolo-ribaudo/idb). An event-sourcing layer records every mutation for future cross-device sync.
 
-![Screenshot](screenshot.png)
+![Boards list](screenshot-boards.png)
+![Board with columns and cards](screenshot-board.png)
+![Dragging a card between columns](screenshot-drag.png)
 
 ## Why
 

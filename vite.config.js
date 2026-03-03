@@ -2,6 +2,7 @@ import { defineConfig } from 'vite';
 import serviceWorkerPlugin from './vite-plugin-sw.js';
 
 export default defineConfig({
+  base: process.env.GITHUB_ACTIONS ? '/datastar-sw-experiment/' : '/',
   plugins: [serviceWorkerPlugin()],
   esbuild: {
     jsx: 'automatic',
