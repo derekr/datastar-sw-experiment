@@ -434,7 +434,7 @@ function Card({ card }) {
       <span>{card.title}</span>
       <button
         class="delete-btn"
-        data-on:click__viewtransition={`@delete('/cards/${card.id}')`}
+        data-on:click__viewtransition={`@delete('${base()}cards/${card.id}')`}
       >
         ×
       </button>
@@ -459,7 +459,7 @@ function Column({ col, cards, columnCount }) {
         {columnCount > 1 && (
           <button
             class="col-delete-btn"
-            data-on:click__viewtransition={`@delete('/columns/${col.id}')`}
+            data-on:click__viewtransition={`@delete('${base()}columns/${col.id}')`}
           >×</button>
         )}
       </div>
@@ -470,7 +470,7 @@ function Column({ col, cards, columnCount }) {
       </div>
       <form
         class="add-form"
-        data-on:submit__prevent__viewtransition={`@post('/columns/${col.id}/cards', {contentType: 'form'}); evt.target.reset()`}
+        data-on:submit__prevent__viewtransition={`@post('${base()}columns/${col.id}/cards', {contentType: 'form'}); evt.target.reset()`}
       >
         <input name="title" type="text" placeholder="Add a card..." autocomplete="off" />
         <button type="submit">+</button>
@@ -491,7 +491,7 @@ function Board({ board, columns, cards }) {
       </div>
       <form
         class="add-col-form"
-        data-on:submit__prevent__viewtransition={`@post('/boards/${board.id}/columns', {contentType: 'form'}); evt.target.reset()`}
+        data-on:submit__prevent__viewtransition={`@post('${base()}boards/${board.id}/columns', {contentType: 'form'}); evt.target.reset()`}
       >
         <input name="title" type="text" placeholder="Add a column..." autocomplete="off" />
         <button type="submit">+ Column</button>
@@ -513,7 +513,7 @@ function BoardCard({ board }) {
       </a>
       <button
         class="board-delete-btn"
-        data-on:click__prevent__viewtransition={`@delete('/boards/${board.id}')`}
+        data-on:click__prevent__viewtransition={`@delete('${base()}boards/${board.id}')`}
       >×</button>
     </div>
   )
@@ -527,7 +527,7 @@ function BoardsList({ boards }) {
         {boards.map(b => <BoardCard board={b} />)}
         <form
           class="board-new"
-          data-on:submit__prevent="@post('/boards', {contentType: 'form'})"
+          data-on:submit__prevent={`@post('${base()}boards', {contentType: 'form'})`}
         >
           <input name="title" type="text" placeholder="New board name..." autocomplete="off" />
           <button type="submit">+ Board</button>
@@ -869,8 +869,10 @@ body[style*="cursor: grabbing"] * { cursor: grabbing !important; }
 `
 
 function Shell({ path, children }) {
-  const sseUrl = path || '/'
-  const isBoardPage = sseUrl.startsWith('/boards/')
+  const routePath = path || '/'
+  const isBoardPage = routePath.startsWith('/boards/')
+  // Client-side SSE URL needs the base path so the browser hits the SW scope.
+  const sseUrl = base() + routePath.replace(/^\//, '')
   return (
     <html lang="en">
       <head>
@@ -882,7 +884,7 @@ function Shell({ path, children }) {
           type="module"
           src="https://cdn.jsdelivr.net/gh/starfederation/datastar@1.0.0-RC.8/bundles/datastar.js"
         ></script>
-        {isBoardPage && <script src="/eg-kanban.js"></script>}
+        {isBoardPage && <script src={`${base()}eg-kanban.js`}></script>}
       </head>
       <body>
         <main
@@ -942,7 +944,7 @@ function Shell({ path, children }) {
             var d = e.detail;
             if (!d.columnId || !d.cardId) return;
             pendingFocus = { cardId: d.cardId };
-            fetch('/cards/' + d.cardId + '/move', {
+            fetch('${base()}cards/' + d.cardId + '/move', {
               method: 'PUT',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ dropColumnId: d.columnId, dropPosition: d.position })
@@ -953,7 +955,7 @@ function Shell({ path, children }) {
             var d = e.detail;
             if (!d.columnId) return;
             pendingFocus = { columnId: d.columnId };
-            fetch('/columns/' + d.columnId + '/move', {
+            fetch('${base()}columns/' + d.columnId + '/move', {
               method: 'PUT',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ dropPosition: d.position })
@@ -1111,7 +1113,7 @@ function EventsPage() {
         <div class="actions">
           <button
             data-indicator="_rebuilding"
-            data-on:click="@post('/rebuild')"
+            data-on:click={`@post('${base()}rebuild')`}
             data-attr:disabled="$_rebuilding"
           >
             <span data-show="!$_rebuilding">Rebuild Projection</span>
@@ -1120,7 +1122,7 @@ function EventsPage() {
         </div>
         <div
           id="events-app"
-          data-init="@get('/events', { retry: 'always', retryMaxCount: 1000 })"
+           data-init={`@get('${base()}events', { retry: 'always', retryMaxCount: 1000 })`}
         >
           <p style="color: #475569;">Connecting...</p>
         </div>
@@ -1409,12 +1411,17 @@ self.addEventListener('fetch', (event) => {
   }
   // Spread only safe RequestInit properties — mode:'navigate' is not
   // settable via the Request constructor, so we omit it (defaults to 'cors').
-  const req = new Request(url, {
+  // duplex:'half' is required when body is a ReadableStream.
+  const init = {
     method: event.request.method,
     headers: event.request.headers,
-    body: event.request.body,
     redirect: event.request.redirect,
     signal: event.request.signal,
-  })
+  }
+  if (event.request.body) {
+    init.body = event.request.body
+    init.duplex = 'half'
+  }
+  const req = new Request(url, init)
   event.respondWith(app.fetch(req))
 })
