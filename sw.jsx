@@ -682,7 +682,7 @@ function Board({ board, columns, cards }) {
 function BoardCard({ board }) {
   return (
     <div class="board-card" style={`view-transition-name: board-${board.id}`}>
-      <a class="board-card-link" href={`/boards/${board.id}`}>
+      <a class="board-card-link" href={`${base()}boards/${board.id}`}>
         <h2>{board.title}</h2>
         <div class="board-meta">
           <span>{board.columnCount} {board.columnCount === 1 ? 'column' : 'columns'}</span>
