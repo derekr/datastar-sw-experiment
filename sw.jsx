@@ -6,6 +6,14 @@ import { raw } from 'hono/html'
 import { generateKeyBetween, generateNKeysBetween } from 'fractional-indexing'
 import egKanbanCode from './eg-kanban.js?raw'
 
+// Base path derived from SW scope — '/' locally, '/repo-name/' on GitHub Pages.
+// Lazy-init because self.registration isn't available at module parse time.
+let _base
+function base() {
+  if (!_base) _base = new URL(self.registration.scope).pathname
+  return _base
+}
+
 // --- Event Sourcing ---
 
 // Event schema versions. Bump when event shape changes.
@@ -475,7 +483,7 @@ function Board({ board, columns, cards }) {
   return (
     <div id="board">
       <div class="board-header">
-        <a href="/" class="back-link">← Boards</a>
+        <a href={base()} class="back-link">← Boards</a>
         <h1>{board.title}</h1>
       </div>
       <div class="columns">
@@ -1099,7 +1107,7 @@ function EventsPage() {
         ></script>
       </head>
       <body>
-        <h1>Event Log <span><a href="/">← board</a></span></h1>
+        <h1>Event Log <span><a href={base()}>← board</a></span></h1>
         <div class="actions">
           <button
             data-indicator="_rebuilding"
@@ -1155,7 +1163,7 @@ app.get('/', async (c) => {
           // Redirect to the newly created board instead of morphing the list
           stream.writeSSE({
             event: 'datastar-patch-elements',
-            data: `mode append\nselector body\nelements <script>window.location.href = '/boards/${evt.data.id}'</script>`,
+            data: `mode append\nselector body\nelements <script>window.location.href = '${base()}boards/${evt.data.id}'</script>`,
           })
           return
         }
