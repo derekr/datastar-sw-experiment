@@ -1407,6 +1407,14 @@ self.addEventListener('fetch', (event) => {
   if (scope !== '/' && url.pathname.startsWith(scope)) {
     url.pathname = '/' + url.pathname.slice(scope.length)
   }
-  const req = new Request(url, event.request)
+  // Spread only safe RequestInit properties — mode:'navigate' is not
+  // settable via the Request constructor, so we omit it (defaults to 'cors').
+  const req = new Request(url, {
+    method: event.request.method,
+    headers: event.request.headers,
+    body: event.request.body,
+    redirect: event.request.redirect,
+    signal: event.request.signal,
+  })
   event.respondWith(app.fetch(req))
 })
