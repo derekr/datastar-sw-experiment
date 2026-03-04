@@ -617,12 +617,13 @@ function Card({ card, uiState }) {
       id={`card-${card.id}`}
       data-card-id={card.id}
       tabindex="0"
+      {...(isSelecting ? {
+        'data-kanban-no-drag': '',
+        'data-on:click': `@post('${base()}cards/${card.id}/toggle-select')`,
+      } : {})}
     >
       {isSelecting && (
-        <button
-          class="card-select-checkbox"
-          data-on:click={`@post('${base()}cards/${card.id}/toggle-select')`}
-        >{isSelected ? '\u2611' : '\u2610'}</button>
+        <span class="card-select-checkbox">{isSelected ? '\u2611' : '\u2610'}</span>
       )}
       <div class="card-content">
         <span class="card-title">{card.title}</span>
@@ -2132,12 +2133,22 @@ function emitUI(boardId) {
   bus.dispatchEvent(new CustomEvent(`board:${boardId}:ui`, { detail: null }))
 }
 
-// Action sheet: open for a card
+// Action sheet: open for a card (or toggle-select if selection mode is active)
 app.post('/cards/:cardId/sheet', async (c) => {
   const cardId = c.req.param('cardId')
   const boardId = await boardIdFromCard(cardId)
   if (!boardId) return c.body(null, 404)
   const ui = getUIState(boardId)
+  // In selection mode, tap toggles selection instead of opening sheet
+  if (ui.selectionMode) {
+    if (ui.selectedCards.has(cardId)) {
+      ui.selectedCards.delete(cardId)
+    } else {
+      ui.selectedCards.add(cardId)
+    }
+    emitUI(boardId)
+    return c.body(null, 204)
+  }
   // Toggle: if already open for this card, close it
   ui.activeCardSheet = ui.activeCardSheet === cardId ? null : cardId
   ui.editingCard = null

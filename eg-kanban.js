@@ -632,10 +632,12 @@
       var type = null
       var el = null
 
-      // Card drag: grab the card itself (but not buttons inside it)
+      // Card drag: grab the card itself (but not buttons/inputs inside it)
       if (target.closest('button') || target.closest('input') || target.closest('a') || target.closest('textarea') || target.closest('form')) return
       var card = target.closest('.card')
       if (card) {
+        // data-kanban-no-drag: card is in selection mode — let click through
+        if (card.hasAttribute('data-kanban-no-drag')) return
         el = card
         type = 'card'
       }
