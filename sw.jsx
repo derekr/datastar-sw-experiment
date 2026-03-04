@@ -29,6 +29,17 @@ const EVENT_VERSIONS = {
   'card.deleted': 1,
   'card.titleUpdated': 1,
   'card.descriptionUpdated': 1,
+  'card.labelUpdated': 1,
+}
+
+const LABEL_COLORS = {
+  red: '#ef4444',
+  orange: '#f97316',
+  yellow: '#eab308',
+  green: '#22c55e',
+  blue: '#3b82f6',
+  purple: '#8b5cf6',
+  pink: '#ec4899',
 }
 
 // Upcasters transform old event versions to current during replay.
@@ -145,6 +156,14 @@ async function applyEvent(event, tx) {
       const card = await store.get(data.id)
       if (!card) break
       await store.put({ ...card, description: data.description })
+      break
+    }
+
+    case 'card.labelUpdated': {
+      const store = tx.objectStore('cards')
+      const card = await store.get(data.id)
+      if (!card) break
+      await store.put({ ...card, label: data.label })
       break
     }
 
@@ -309,6 +328,15 @@ async function buildUndoEntry(events) {
         if (card) {
           undoEvents.push({ type: 'card.descriptionUpdated', data: { id: data.id, description: card.description || '' } })
           redoEvents.push({ type: 'card.descriptionUpdated', data: { ...data } })
+        }
+        break
+      }
+
+      case 'card.labelUpdated': {
+        const card = await db.get('cards', data.id)
+        if (card) {
+          undoEvents.push({ type: 'card.labelUpdated', data: { id: data.id, label: card.label || null } })
+          redoEvents.push({ type: 'card.labelUpdated', data: { ...data } })
         }
         break
       }
@@ -744,8 +772,40 @@ function dsePatch(selector, jsx, mode = 'outer', { useViewTransition = false } =
 
 // --- Components ---
 
+function LabelPicker({ cardId, currentLabel }) {
+  const swatches = Object.entries(LABEL_COLORS).map(([name, color]) => {
+    const target = currentLabel === name ? 'none' : name
+    return (
+      <button
+        type="button"
+        class={`label-swatch${currentLabel === name ? ' label-swatch--active' : ''}`}
+        style={`--swatch-color: ${color}`}
+        data-on:click={`@post('${base()}cards/${cardId}/label/${target}')`}
+        title={name}
+      >{' '}</button>
+    )
+  })
+  return (
+    <div class="label-picker">
+      <span class="label-picker-label">Label</span>
+      <div class="label-picker-swatches">
+        {swatches}
+        {currentLabel && (
+          <button
+            type="button"
+            class="label-swatch-clear"
+            data-on:click={`@post('${base()}cards/${cardId}/label/none')`}
+            title="Remove label"
+          >×</button>
+        )}
+      </div>
+    </div>
+  )
+}
+
 function Card({ card, uiState }) {
   const desc = card.description || ''
+  const label = card.label || null
   const isReadOnly = uiState?.timeTravelPos >= 0
   const isEditing = !isReadOnly && uiState?.editingCard === card.id
   const isSelecting = !isReadOnly && uiState?.selectionMode
@@ -753,10 +813,11 @@ function Card({ card, uiState }) {
 
   return (
     <div
-      class={`card${isSelected ? ' card--selected' : ''}`}
+      class={`card${isSelected ? ' card--selected' : ''}${label ? ' card--labeled' : ''}`}
       id={`card-${card.id}`}
       data-card-id={card.id}
       tabindex="0"
+      style={label ? `border-top: 3px solid ${LABEL_COLORS[label] || '#64748b'}` : ''}
       {...(isSelecting ? {
         'data-kanban-no-drag': '',
         'data-on:click': `@post('${base()}cards/${card.id}/toggle-select')`,
@@ -791,6 +852,7 @@ function Card({ card, uiState }) {
         >
           <input name="title" type="text" value={card.title} placeholder="Title" autocomplete="off" />
           <textarea name="description" placeholder="Description (optional)" rows="2">{desc}</textarea>
+          <LabelPicker cardId={card.id} currentLabel={label} />
           <div class="card-edit-actions">
             <button type="submit">Save</button>
             <button type="button" data-on:click={`@post('${base()}cards/${card.id}/edit-cancel')`}>Cancel</button>
@@ -821,6 +883,29 @@ function ActionSheet({ card, columns }) {
             ))}
           </div>
         )}
+        <div class="action-sheet-section">
+          <span class="action-sheet-label">Label</span>
+          <div class="action-sheet-swatches">
+            {Object.entries(LABEL_COLORS).map(([name, color]) => {
+              const target = card.label === name ? 'none' : name
+              return (
+                <button
+                  class={`label-swatch label-swatch--lg${card.label === name ? ' label-swatch--active' : ''}`}
+                  style={`--swatch-color: ${color}`}
+                  data-on:click={`@post('${base()}cards/${card.id}/label/${target}')`}
+                  title={name}
+                >{' '}</button>
+              )
+            })}
+            {card.label && (
+              <button
+                class="label-swatch-clear"
+                data-on:click={`@post('${base()}cards/${card.id}/label/none')`}
+                title="Remove label"
+              >×</button>
+            )}
+          </div>
+        </div>
         <div class="action-sheet-section">
           <button
             class="action-sheet-btn"
@@ -932,6 +1017,7 @@ function eventLabel(type) {
     'card.deleted': 'Card deleted',
     'card.titleUpdated': 'Card renamed',
     'card.descriptionUpdated': 'Description edited',
+    'card.labelUpdated': 'Label changed',
   }
   return labels[type] || type
 }
@@ -1488,6 +1574,8 @@ input:not(#_), textarea:not(#_), select:not(#_) { font-size: max(1rem, 16px); }
 .card[data-kanban-hold] { opacity: 0.5; z-index: 100; }
 .card[data-kanban-dropping] { position: relative; z-index: 50; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3); }
 
+.card--labeled { padding-top: 8px; }
+
 .card-content { flex: 1; min-width: 0; }
 .card-title { font-size: 0.9rem; word-break: break-word; }
 .card-desc { font-size: 0.8rem; color: #94a3b8; margin: 4px 0 0; word-break: break-word; }
@@ -1519,6 +1607,60 @@ input:not(#_), textarea:not(#_), select:not(#_) { font-size: max(1rem, 16px); }
 .card-edit-actions button[type="submit"]:hover { background: #4f46e5; }
 .card-edit-actions button[type="button"] { background: #1e293b; color: #94a3b8; }
 .card-edit-actions button[type="button"]:hover { background: #334155; }
+
+/* ── Label picker + swatches ─────────────────────── */
+
+.label-picker {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.label-picker-label {
+  font-size: 0.75rem;
+  color: #94a3b8;
+  white-space: nowrap;
+}
+.label-picker-swatches,
+.action-sheet-swatches {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.label-swatch {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  background: var(--swatch-color);
+  cursor: pointer;
+  padding: 0;
+  transition: border-color 0.15s, transform 0.15s;
+}
+.label-swatch:hover { transform: scale(1.2); }
+.label-swatch--active {
+  border-color: #fff;
+  box-shadow: 0 0 0 2px var(--swatch-color);
+}
+.label-swatch--lg {
+  width: 28px;
+  height: 28px;
+}
+.label-swatch-clear {
+  background: none;
+  border: 1px solid #475569;
+  border-radius: 50%;
+  width: 20px;
+  height: 20px;
+  color: #94a3b8;
+  cursor: pointer;
+  padding: 0;
+  font-size: 0.7rem;
+  display: grid;
+  place-items: center;
+  transition: color 0.15s;
+}
+.label-swatch-clear:hover { color: #f87171; }
 
 .card-ghost {
   border: 2px dashed #6366f1;
@@ -2763,6 +2905,31 @@ app.post('/cards/:cardId/sheet-move/:columnId', async (c) => {
     const ui = getUIState(boardId)
     ui.activeCardSheet = null
     // Data change already triggers SSE push via bus, no need for emitUI
+  }
+  return c.body(null, 204)
+})
+
+// Set/remove card label
+app.post('/cards/:cardId/label/:label', async (c) => {
+  const cardId = c.req.param('cardId')
+  const labelParam = c.req.param('label')
+  const label = labelParam === 'none' ? null : (LABEL_COLORS[labelParam] ? labelParam : null)
+
+  const db = await dbPromise
+  const card = await db.get('cards', cardId)
+  if (!card) return c.body(null, 404)
+
+  const currentLabel = card.label || null
+  if (label === currentLabel) return c.body(null, 204)
+
+  const boardId = await boardIdFromCard(cardId)
+  const evt = createEvent('card.labelUpdated', { id: cardId, label })
+  await appendEventsWithUndo([evt], boardId)
+
+  // Dismiss action sheet if open
+  if (boardId) {
+    const ui = getUIState(boardId)
+    ui.activeCardSheet = null
   }
   return c.body(null, 204)
 })
