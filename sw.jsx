@@ -375,12 +375,13 @@ async function appendEventsWithUndo(events, boardId, { isUndoRedo = false } = {}
 // relevant UI baked in (action sheet, selection mode, editing card).
 // No client signals needed — the server is the source of truth for UI mode.
 
-const boardUIState = new Map() // boardId → { activeCardSheet, selectionMode, selectedCards, editingCard }
+const boardUIState = new Map() // boardId → { activeCardSheet, activeColSheet, selectionMode, selectedCards, editingCard }
 
 function getUIState(boardId) {
   if (!boardUIState.has(boardId)) {
     boardUIState.set(boardId, {
       activeCardSheet: null,   // card ID whose action sheet is open, or null
+      activeColSheet: null,    // column ID whose action sheet is open, or null
       selectionMode: false,    // whether selection mode is active
       selectedCards: new Set(), // set of selected card IDs
       editingCard: null,       // card ID being edited inline, or null
@@ -392,6 +393,7 @@ function getUIState(boardId) {
 function clearUIState(boardId) {
   const ui = getUIState(boardId)
   ui.activeCardSheet = null
+  ui.activeColSheet = null
   ui.selectionMode = false
   ui.selectedCards.clear()
   ui.editingCard = null
@@ -700,6 +702,45 @@ function ActionSheet({ card, columns }) {
   )
 }
 
+function ColumnSheet({ col, colIndex, columnCount, boardId }) {
+  return (
+    <div class="action-sheet-backdrop" data-on:click={`@post('${base()}columns/sheet/dismiss')`}>
+      <div class="action-sheet" data-on:click__stop="void 0">
+        <div class="action-sheet-header">
+          <span class="action-sheet-title">{col.title}</span>
+        </div>
+        <div class="action-sheet-section">
+          <span class="action-sheet-label">Reorder</span>
+          {colIndex > 0 && (
+            <button
+              class="action-sheet-btn"
+              data-on:click={`@post('${base()}columns/${col.id}/sheet-move-left')`}
+            >← Move left</button>
+          )}
+          {colIndex < columnCount - 1 && (
+            <button
+              class="action-sheet-btn"
+              data-on:click={`@post('${base()}columns/${col.id}/sheet-move-right')`}
+            >Move right →</button>
+          )}
+        </div>
+        {columnCount > 1 && (
+          <div class="action-sheet-section">
+            <button
+              class="action-sheet-btn action-sheet-btn--danger"
+              data-on:click__viewtransition={`@delete('${base()}columns/${col.id}')`}
+            >Delete column</button>
+          </div>
+        )}
+        <button
+          class="action-sheet-btn action-sheet-btn--cancel"
+          data-on:click={`@post('${base()}columns/sheet/dismiss')`}
+        >Cancel</button>
+      </div>
+    </div>
+  )
+}
+
 function Column({ col, cards, columnCount, uiState, columns }) {
   const colCards = cards
     .filter(c => c.columnId === col.id)
@@ -745,6 +786,10 @@ function Board({ board, columns, cards, uiState }) {
   const sheetCard = uiState?.activeCardSheet
     ? cards.find(c => c.id === uiState.activeCardSheet) || null
     : null
+  const sheetColIndex = uiState?.activeColSheet
+    ? columns.findIndex(c => c.id === uiState.activeColSheet)
+    : -1
+  const sheetCol = sheetColIndex >= 0 ? columns[sheetColIndex] : null
   return (
     <div id="board">
       <div class="board-header">
@@ -776,6 +821,9 @@ function Board({ board, columns, cards, uiState }) {
       )}
       {sheetCard && (
         <ActionSheet card={sheetCard} columns={columns} />
+      )}
+      {sheetCol && (
+        <ColumnSheet col={sheetCol} colIndex={sheetColIndex} columnCount={columns.length} boardId={board.id} />
       )}
     </div>
   )
@@ -1602,6 +1650,13 @@ function Shell({ path, children }) {
             fetch('${base()}cards/' + d.cardId + '/sheet', { method: 'POST' });
           });
 
+          // Touch column tap → open column action sheet
+          document.getElementById('app').addEventListener('kanban-column-tap', function(e) {
+            var d = e.detail;
+            if (!d.columnId) return;
+            fetch('${base()}columns/' + d.columnId + '/sheet', { method: 'POST' });
+          });
+
           document.getElementById('app').addEventListener('kanban-column-drag-end', function(e) {
             var d = e.detail;
             if (!d.columnId) return;
@@ -2051,6 +2106,10 @@ app.put('/cards/:cardId/move', async (c) => {
 app.delete('/columns/:columnId', async (c) => {
   const columnId = c.req.param('columnId')
   const boardId = await boardIdFromColumn(columnId)
+  if (boardId) {
+    const ui = getUIState(boardId)
+    if (ui.activeColSheet === columnId) ui.activeColSheet = null
+  }
   const evt = createEvent('column.deleted', { id: columnId })
   await appendEventsWithUndo([evt], boardId)
   return c.body(null, 204)
@@ -2156,9 +2215,8 @@ app.post('/cards/:cardId/sheet', async (c) => {
   return c.body(null, 204)
 })
 
-// Action sheet: dismiss
+// Action sheet: dismiss (card or column)
 app.post('/cards/sheet/dismiss', async (c) => {
-  // Need to find which board has an active sheet — check all
   for (const [boardId, ui] of boardUIState) {
     if (ui.activeCardSheet) {
       ui.activeCardSheet = null
@@ -2166,6 +2224,81 @@ app.post('/cards/sheet/dismiss', async (c) => {
       return c.body(null, 204)
     }
   }
+  return c.body(null, 204)
+})
+
+// Column sheet: open
+app.post('/columns/:columnId/sheet', async (c) => {
+  const columnId = c.req.param('columnId')
+  const boardId = await boardIdFromColumn(columnId)
+  if (!boardId) return c.body(null, 404)
+  const ui = getUIState(boardId)
+  ui.activeColSheet = ui.activeColSheet === columnId ? null : columnId
+  ui.activeCardSheet = null
+  ui.editingCard = null
+  emitUI(boardId)
+  return c.body(null, 204)
+})
+
+// Column sheet: dismiss
+app.post('/columns/sheet/dismiss', async (c) => {
+  for (const [boardId, ui] of boardUIState) {
+    if (ui.activeColSheet) {
+      ui.activeColSheet = null
+      emitUI(boardId)
+      return c.body(null, 204)
+    }
+  }
+  return c.body(null, 204)
+})
+
+// Column sheet: move left (swap with previous sibling)
+app.post('/columns/:columnId/sheet-move-left', async (c) => {
+  const columnId = c.req.param('columnId')
+  const db = await dbPromise
+  const col = await db.get('columns', columnId)
+  if (!col) return c.body(null, 404)
+
+  const siblings = (await db.getAllFromIndex('columns', 'byBoard', col.boardId))
+    .filter(c => c.id !== columnId)
+    .sort(cmpPosition)
+  const allCols = (await db.getAllFromIndex('columns', 'byBoard', col.boardId)).sort(cmpPosition)
+  const idx = allCols.findIndex(c => c.id === columnId)
+  if (idx <= 0) return c.body(null, 204)
+
+  const evt = createEvent('column.moved', {
+    id: columnId,
+    position: positionForIndex(idx - 1, siblings),
+  })
+  await appendEventsWithUndo([evt], col.boardId)
+  // Dismiss sheet
+  const ui = getUIState(col.boardId)
+  ui.activeColSheet = null
+  return c.body(null, 204)
+})
+
+// Column sheet: move right (swap with next sibling)
+app.post('/columns/:columnId/sheet-move-right', async (c) => {
+  const columnId = c.req.param('columnId')
+  const db = await dbPromise
+  const col = await db.get('columns', columnId)
+  if (!col) return c.body(null, 404)
+
+  const siblings = (await db.getAllFromIndex('columns', 'byBoard', col.boardId))
+    .filter(c => c.id !== columnId)
+    .sort(cmpPosition)
+  const allCols = (await db.getAllFromIndex('columns', 'byBoard', col.boardId)).sort(cmpPosition)
+  const idx = allCols.findIndex(c => c.id === columnId)
+  if (idx >= allCols.length - 1) return c.body(null, 204)
+
+  const evt = createEvent('column.moved', {
+    id: columnId,
+    position: positionForIndex(idx + 1, siblings),
+  })
+  await appendEventsWithUndo([evt], col.boardId)
+  // Dismiss sheet
+  const ui = getUIState(col.boardId)
+  ui.activeColSheet = null
   return c.body(null, 204)
 })
 

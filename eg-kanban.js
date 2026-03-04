@@ -386,8 +386,8 @@
 
     function onPointerMove(e) {
       if (pending && !drag) {
-        // touch-card is tap-only, not drag — if finger moves too far, cancel
-        if (pending.type === 'touch-card') {
+        // touch taps are tap-only, not drag — if finger moves too far, cancel
+        if (pending.type === 'touch-card' || pending.type === 'touch-column') {
           var tdx = e.clientX - pending.startX
           var tdy = e.clientY - pending.startY
           if (Math.sqrt(tdx * tdx + tdy * tdy) >= 10) {
@@ -539,16 +539,19 @@
     }
 
     function onPointerUp(e) {
-      // Touch card tap: if the finger didn't move much, emit event for action sheet
-      if (pending && pending.type === 'touch-card') {
+      // Touch taps: if the finger didn't move much, emit event for action sheet
+      if (pending && (pending.type === 'touch-card' || pending.type === 'touch-column')) {
         var dx = e.clientX - pending.startX
         var dy = e.clientY - pending.startY
         var elapsed = performance.now() - pending.startTime
         // Treat as tap if < 10px movement and < 500ms
         if (Math.sqrt(dx * dx + dy * dy) < 10 && elapsed < 500) {
-          var cardId = getCardId(pending.el)
-          if (cardId) {
-            emit('card-tap', { cardId: cardId })
+          if (pending.type === 'touch-card') {
+            var cardId = getCardId(pending.el)
+            if (cardId) emit('card-tap', { cardId: cardId })
+          } else {
+            var columnId = getColumnId(pending.el)
+            if (columnId) emit('column-tap', { columnId: columnId })
           }
         }
         pending = null
@@ -616,8 +619,8 @@
         emit(type + '-drag-cancel', type === 'card' ? { cardId: id } : { columnId: id })
       }
       if (pending) {
-        // touch-card pending doesn't capture, so only release for real drag pending
-        if (pending.type !== 'touch-card') {
+        // touch pending doesn't capture, so only release for real drag pending
+        if (pending.type !== 'touch-card' && pending.type !== 'touch-column') {
           pending.el.releasePointerCapture(pending.pointerId)
         }
         pending = null
@@ -653,14 +656,14 @@
 
       if (!el || !type) return
 
-      // Touch devices: skip drag entirely. Tap on card → open action sheet.
-      // Let native scroll handle swipe. Column drag also disabled on touch.
+      // Touch devices: skip drag entirely. Tap on card/column → action sheet.
+      // Let native scroll handle swipe.
       if (e.pointerType === 'touch') {
-        if (type === 'card') {
+        if (type === 'card' || type === 'column') {
           // Record touch start for tap detection (onPointerUp handles it)
           pending = {
             el: el,
-            type: 'touch-card',
+            type: type === 'card' ? 'touch-card' : 'touch-column',
             pointerId: e.pointerId,
             startX: e.clientX,
             startY: e.clientY,
