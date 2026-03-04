@@ -2242,6 +2242,13 @@ function Shell({ path, children }) {
           src="https://cdn.jsdelivr.net/gh/starfederation/datastar@1.0.0-RC.8/bundles/datastar.js"
         ></script>
         {isBoardPage && <script src={`${base()}eg-kanban.js`}></script>}
+        {!isBoardPage && <script type="speculationrules">{raw(JSON.stringify({
+          prefetch: [{
+            source: 'document',
+            where: { href_matches: `${base()}boards/*` },
+            eagerness: 'moderate',
+          }],
+        }))}</script>}
       </head>
       <body>
         <main
