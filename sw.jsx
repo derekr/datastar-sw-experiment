@@ -19,6 +19,7 @@ function base() {
 // Event schema versions. Bump when event shape changes.
 const EVENT_VERSIONS = {
   'board.created': 1,
+  'board.titleUpdated': 1,
   'board.deleted': 1,
   'column.created': 2,
   'column.deleted': 1,
@@ -402,6 +403,8 @@ function getUIState(boardId) {
       selectedCards: new Set(), // set of selected card IDs
       editingCard: null,       // card ID being edited inline, or null
       editingBoardTitle: false, // whether the board title is being edited inline
+      timeTravelEvents: null,  // array of { seq, type, data, ts } for this board, or null
+      timeTravelPos: -1,       // current position in timeTravelEvents (-1 = not active)
     })
   }
   return boardUIState.get(boardId)
@@ -415,6 +418,85 @@ function clearUIState(boardId) {
   ui.selectedCards.clear()
   ui.editingCard = null
   ui.editingBoardTitle = false
+  ui.timeTravelEvents = null
+  ui.timeTravelPos = -1
+}
+
+// ── Time travel: in-memory replay ────────────────────────────────────────────
+
+// Fake IDB transaction backed by Maps — allows reusing applyEvent for replay.
+function createMemoryTx() {
+  const stores = { boards: new Map(), columns: new Map(), cards: new Map() }
+  function makeStore(map, indexes) {
+    const s = {
+      get(key) { return map.get(key) },
+      put(obj) { map.set(obj.id, obj) },
+      delete(key) { map.delete(key) },
+      getAll() { return [...map.values()] },
+      getAllKeys() { return [...map.keys()] },
+      clear() { map.clear() },
+      index(name) {
+        const fn = indexes[name]
+        return { getAll(key) { return [...map.values()].filter(v => fn(v) === key) } }
+      },
+    }
+    return s
+  }
+  const txStores = {
+    boards: makeStore(stores.boards, {}),
+    columns: makeStore(stores.columns, { byBoard: c => c.boardId }),
+    cards: makeStore(stores.cards, { byColumn: c => c.columnId }),
+    events: { put() {} }, // no-op: don't persist upcasts during replay
+  }
+  return {
+    objectStore(name) { return txStores[name] },
+    stores,
+  }
+}
+
+// Replay events up to position idx in the given event list.
+// Returns { board, columns, cards } for the specified boardId, or null.
+async function replayToPosition(events, idx, boardId) {
+  const memTx = createMemoryTx()
+  for (let i = 0; i <= idx && i < events.length; i++) {
+    await applyEvent(events[i], memTx)
+  }
+  const { stores } = memTx
+  const board = stores.boards.get(boardId)
+  if (!board) return null
+  const columns = [...stores.columns.values()]
+    .filter(c => c.boardId === boardId)
+    .sort((a, b) => (a.position || '').localeCompare(b.position || ''))
+  const cards = [...stores.cards.values()]
+    .filter(c => columns.some(col => col.id === c.columnId))
+    .sort((a, b) => (a.position || '').localeCompare(b.position || ''))
+  return { board, columns, cards }
+}
+
+// Load all events and identify which ones affect the given board.
+// Returns the full event array (for replay) and a filtered array of
+// { idx, seq, type, summary, ts } entries for the scrubber.
+async function loadTimeTravelEvents(boardId) {
+  const db = await dbPromise
+  const allEvents = await db.getAll('events')
+  // Replay all events, tracking which indices affect this board
+  const memTx = createMemoryTx()
+  const boardEvents = []
+  for (let i = 0; i < allEvents.length; i++) {
+    const event = upcast(allEvents[i])
+    // Resolve board BEFORE applying (same as appendEvents)
+    const evtBoardId = await boardIdForEvent(event, memTx)
+    await applyEvent(event, memTx)
+    if (evtBoardId === boardId) {
+      boardEvents.push({
+        idx: i,
+        seq: event.seq,
+        type: event.type,
+        ts: event.ts,
+      })
+    }
+  }
+  return { allEvents: allEvents.map(e => upcast(e)), boardEvents }
 }
 
 // ── Per-board tab presence (via clients API) ─────────────────────────────────
@@ -644,8 +726,9 @@ function dsePatch(selector, jsx, mode = 'outer', { useViewTransition = false } =
 
 function Card({ card, uiState }) {
   const desc = card.description || ''
-  const isEditing = uiState?.editingCard === card.id
-  const isSelecting = uiState?.selectionMode
+  const isReadOnly = uiState?.timeTravelPos >= 0
+  const isEditing = !isReadOnly && uiState?.editingCard === card.id
+  const isSelecting = !isReadOnly && uiState?.selectionMode
   const isSelected = uiState?.selectedCards?.has(card.id)
 
   return (
@@ -666,7 +749,7 @@ function Card({ card, uiState }) {
         <span class="card-title">{card.title}</span>
         {desc && <p class="card-desc">{desc}</p>}
       </div>
-      {!isSelecting && (
+      {!isSelecting && !isReadOnly && (
         <div class="card-actions">
           <button
             class="card-edit-btn"
@@ -780,6 +863,7 @@ function Column({ col, cards, columnCount, uiState, columns }) {
   const colCards = cards
     .filter(c => c.columnId === col.id)
     .sort(cmpPosition)
+  const isReadOnly = uiState?.timeTravelPos >= 0
 
   return (
     <div
@@ -790,7 +874,7 @@ function Column({ col, cards, columnCount, uiState, columns }) {
       <div class="column-header" tabindex="0">
         <h2>{col.title}</h2>
         <span class="count">{colCards.length}</span>
-        {columnCount > 1 && (
+        {!isReadOnly && columnCount > 1 && (
           <button
             class="col-delete-btn"
             data-on:click__viewtransition={`@delete('${base()}columns/${col.id}')`}
@@ -802,7 +886,7 @@ function Column({ col, cards, columnCount, uiState, columns }) {
           ? <p class="empty">No cards yet</p>
           : colCards.map(card => <Card card={card} uiState={uiState} />)}
       </div>
-      {!uiState?.selectionMode && (
+      {!isReadOnly && !uiState?.selectionMode && (
         <form
           class="add-form"
           data-on:submit__prevent__viewtransition={`@post('${base()}columns/${col.id}/cards', {contentType: 'form'}); evt.target.reset()`}
@@ -815,19 +899,83 @@ function Column({ col, cards, columnCount, uiState, columns }) {
   )
 }
 
+function eventLabel(type) {
+  const labels = {
+    'board.created': 'Board created',
+    'board.titleUpdated': 'Title renamed',
+    'board.deleted': 'Board deleted',
+    'column.created': 'Column added',
+    'column.deleted': 'Column deleted',
+    'column.moved': 'Column moved',
+    'card.created': 'Card added',
+    'card.moved': 'Card moved',
+    'card.deleted': 'Card deleted',
+    'card.titleUpdated': 'Card renamed',
+    'card.descriptionUpdated': 'Description edited',
+  }
+  return labels[type] || type
+}
+
+function TimeTravelBar({ boardId, events, pos }) {
+  const current = events[pos]
+  const ts = current ? new Date(current.ts).toLocaleTimeString() : ''
+  const seekUrl = `${base()}boards/${boardId}/time-travel/seek`
+  return (
+    <div id="time-travel-bar" class="time-travel-bar">
+      <div class="tt-header">
+        <span class="tt-label">History</span>
+        <span id="tt-info" class="tt-info">
+          {current ? `${eventLabel(current.type)} — ${ts}` : 'No events'}
+        </span>
+        <button
+          id="tt-exit"
+          class="tt-exit"
+          data-on:click={`@post('${base()}boards/${boardId}/time-travel/exit')`}
+        >Exit</button>
+      </div>
+      <div id="tt-form" class="tt-controls">
+        <button
+          id="tt-prev"
+          type="button"
+          class="tt-step"
+          disabled={pos <= 0}
+          data-on:click={`fetch('${seekUrl}', {method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'position=${pos - 1}'})`}
+        >&larr;</button>
+        <input
+          id="tt-slider"
+          type="range"
+          min="0"
+          max={String(events.length - 1)}
+          value={String(pos)}
+          data-on:input__debounce_100ms={`fetch('${seekUrl}', {method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'position='+evt.target.value})`}
+        />
+        <button
+          id="tt-next"
+          type="button"
+          class="tt-step"
+          disabled={pos >= events.length - 1}
+          data-on:click={`fetch('${seekUrl}', {method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'position=${pos + 1}'})`}
+        >&rarr;</button>
+        <span id="tt-counter" class="tt-counter">{pos + 1} / {events.length}</span>
+      </div>
+    </div>
+  )
+}
+
 function Board({ board, columns, cards, uiState, tabCount }) {
-  const isSelecting = uiState?.selectionMode
-  const isEditingTitle = uiState?.editingBoardTitle
+  const isTimeTraveling = uiState?.timeTravelPos >= 0
+  const isSelecting = !isTimeTraveling && uiState?.selectionMode
+  const isEditingTitle = !isTimeTraveling && uiState?.editingBoardTitle
   const selectedCount = uiState?.selectedCards?.size || 0
-  const sheetCard = uiState?.activeCardSheet
+  const sheetCard = !isTimeTraveling && uiState?.activeCardSheet
     ? cards.find(c => c.id === uiState.activeCardSheet) || null
     : null
-  const sheetColIndex = uiState?.activeColSheet
+  const sheetColIndex = !isTimeTraveling && uiState?.activeColSheet
     ? columns.findIndex(c => c.id === uiState.activeColSheet)
     : -1
   const sheetCol = sheetColIndex >= 0 ? columns[sheetColIndex] : null
   return (
-    <div id="board">
+    <div id="board" class={isTimeTraveling ? 'board--time-travel' : ''}>
       <div id="board-header" class="board-header">
         <a id="board-back" href={base()} class="back-link">← Boards</a>
         {isEditingTitle
@@ -840,23 +988,33 @@ function Board({ board, columns, cards, uiState, tabCount }) {
               <button type="submit" class="board-title-save">Save</button>
               <button type="button" class="board-title-cancel" data-on:click={`@post('${base()}boards/${board.id}/title-edit-cancel')`}>Cancel</button>
             </form>
-          : <h1 id="board-title" class="board-title-editable" data-on:click={`@post('${base()}boards/${board.id}/title-edit')`}>{board.title}</h1>
+          : <h1 id="board-title" class={isTimeTraveling ? '' : 'board-title-editable'} {...(!isTimeTraveling ? { 'data-on:click': `@post('${base()}boards/${board.id}/title-edit')` } : {})}>{board.title}</h1>
         }
         <span id="tab-count" class={`tab-count${tabCount > 1 ? '' : ' tab-count--hidden'}`} title={`${tabCount} tabs viewing this board`}>{tabCount > 1 ? `${tabCount} tabs` : ''}</span>
-        {!isSelecting && (
+        {!isSelecting && !isTimeTraveling && (
           <button
             id="select-mode-btn"
             class="select-mode-btn"
             data-on:click={`@post('${base()}boards/${board.id}/select-mode')`}
           >Select</button>
         )}
+        {!isTimeTraveling && (
+          <button
+            id="time-travel-btn"
+            class="select-mode-btn"
+            data-on:click={`@post('${base()}boards/${board.id}/time-travel')`}
+          >History</button>
+        )}
       </div>
+      {isTimeTraveling && (
+        <TimeTravelBar boardId={board.id} events={uiState.timeTravelEvents} pos={uiState.timeTravelPos} />
+      )}
       <div class="columns">
         {columns.map(col => (
           <Column col={col} cards={cards} columnCount={columns.length} uiState={uiState} columns={columns} />
         ))}
       </div>
-      {!isSelecting && (
+      {!isSelecting && !isTimeTraveling && (
         <form
           class="add-col-form"
           data-on:submit__prevent__viewtransition={`@post('${base()}boards/${board.id}/columns', {contentType: 'form'}); evt.target.reset()`}
@@ -1572,6 +1730,73 @@ input:not(#_), textarea:not(#_), select:not(#_) { font-size: max(1rem, 16px); }
 
 /* ── Selection bar (bottom action bar) ───────────── */
 
+/* ── Time travel ──────────────────────────────────── */
+.board--time-travel { opacity: 0.85; }
+.time-travel-bar {
+  background: #1e293b;
+  border: 1px solid #6366f1;
+  border-radius: 10px;
+  padding: 12px 16px;
+  margin-bottom: clamp(12px, 3vw, 24px);
+}
+.tt-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+.tt-label {
+  font-weight: 600;
+  font-size: 0.85rem;
+  color: #6366f1;
+}
+.tt-info {
+  flex: 1;
+  font-size: 0.8rem;
+  color: #94a3b8;
+}
+.tt-exit {
+  background: #334155;
+  color: #e2e8f0;
+  border: 1px solid #475569;
+  border-radius: 6px;
+  padding: 4px 12px;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+.tt-exit:hover { background: #6366f1; border-color: #6366f1; }
+.tt-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.tt-step {
+  background: #334155;
+  color: #e2e8f0;
+  border: 1px solid #475569;
+  border-radius: 6px;
+  width: 36px;
+  height: 28px;
+  font-size: 0.9rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.tt-step:hover:not(:disabled) { background: #475569; }
+.tt-step:disabled { opacity: 0.3; cursor: default; }
+#tt-slider {
+  flex: 1;
+  accent-color: #6366f1;
+  height: 6px;
+}
+.tt-counter {
+  font-size: 0.75rem;
+  color: #64748b;
+  min-width: 5ch;
+  text-align: right;
+}
+
 .selection-bar {
   position: fixed;
   bottom: 0;
@@ -2062,9 +2287,16 @@ app.get('/boards/:boardId', async (c) => {
   if (c.req.header('Datastar-Request') === 'true') {
     return streamSSE(c, async (stream) => {
       const pushBoard = async (selector, mode, opts) => {
-        const data = await getBoard(boardId)
-        if (!data) return
         const ui = getUIState(boardId)
+        let data
+        if (ui.timeTravelPos >= 0 && ui.timeTravelAllEvents && ui.timeTravelEvents) {
+          // Time travel mode: replay to the current position
+          const targetIdx = ui.timeTravelEvents[ui.timeTravelPos].idx
+          data = await replayToPosition(ui.timeTravelAllEvents, targetIdx, boardId)
+        } else {
+          data = await getBoard(boardId)
+        }
+        if (!data) return
         const tabCount = await getTabCount(boardId)
         await stream.writeSSE(dsePatch(selector, <Board board={data.board} columns={data.columns} cards={data.cards} uiState={ui} tabCount={tabCount} />, mode, opts))
       }
@@ -2512,6 +2744,46 @@ app.put('/boards/:boardId', async (c) => {
 
   const ui = getUIState(boardId)
   ui.editingBoardTitle = false
+  emitUI(boardId)
+  return c.body(null, 204)
+})
+
+// Time travel: enter
+app.post('/boards/:boardId/time-travel', async (c) => {
+  await initialize()
+  const boardId = c.req.param('boardId')
+  const ui = getUIState(boardId)
+  const { allEvents, boardEvents } = await loadTimeTravelEvents(boardId)
+  ui.timeTravelEvents = boardEvents
+  ui.timeTravelAllEvents = allEvents // stash for replay
+  ui.timeTravelPos = boardEvents.length - 1 // start at latest
+  ui.editingCard = null
+  ui.editingBoardTitle = false
+  ui.activeCardSheet = null
+  ui.activeColSheet = null
+  emitUI(boardId)
+  return c.body(null, 204)
+})
+
+// Time travel: seek to position
+app.post('/boards/:boardId/time-travel/seek', async (c) => {
+  const boardId = c.req.param('boardId')
+  const body = await c.req.parseBody()
+  const ui = getUIState(boardId)
+  if (!ui.timeTravelEvents) return c.body(null, 400)
+  const pos = Math.max(0, Math.min(parseInt(body.position, 10) || 0, ui.timeTravelEvents.length - 1))
+  ui.timeTravelPos = pos
+  emitUI(boardId)
+  return c.body(null, 204)
+})
+
+// Time travel: exit
+app.post('/boards/:boardId/time-travel/exit', async (c) => {
+  const boardId = c.req.param('boardId')
+  const ui = getUIState(boardId)
+  ui.timeTravelEvents = null
+  ui.timeTravelAllEvents = null
+  ui.timeTravelPos = -1
   emitUI(boardId)
   return c.body(null, 204)
 })
