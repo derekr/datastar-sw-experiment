@@ -516,6 +516,15 @@ function notifyTabChange(boardId) {
   }, 300))
 }
 
+// Push UI update to all active boards when connection status changes
+function notifyConnectionChange() {
+  for (const boardId of boardUIState.keys()) {
+    bus.dispatchEvent(new CustomEvent(`board:${boardId}:ui`))
+  }
+}
+self.addEventListener('online', notifyConnectionChange)
+self.addEventListener('offline', notifyConnectionChange)
+
 // Nuclear rebuild: clear projection, replay all events in order.
 // Use when projection is suspected to be out of sync with the event log.
 // Saves a snapshot afterward so future incremental rebuilds can skip replayed events.
@@ -661,6 +670,17 @@ async function pullEvents() {
   if (!config?.value) return
   // const lastSeq = (await db.get('meta', 'lastS2Seq'))?.value || 0n
   // TODO: read from S2 stream, appendEvent() each (idempotent by ID)
+}
+
+async function getConnectionStatus() {
+  const db = await dbPromise
+  const isOnline = navigator.onLine
+  const config = await db.get('meta', 's2Config')
+  const hasSyncConfig = !!config?.value
+  // All events are unsynced until sync is implemented (synced field is boolean,
+  // not a valid IDB key type, so bySynced index doesn't work — just count all)
+  const unsyncedCount = await db.count('events')
+  return { isOnline, hasSyncConfig, unsyncedCount }
 }
 
 // --- Queries ---
@@ -962,7 +982,20 @@ function TimeTravelBar({ boardId, events, pos }) {
   )
 }
 
-function Board({ board, columns, cards, uiState, tabCount }) {
+function StatusChip({ isOnline, unsyncedCount, hasSyncConfig }) {
+  if (!isOnline) {
+    return <span id="status-chip" class="status-chip status-chip--offline" title="No network connection">Offline</span>
+  }
+  if (!hasSyncConfig) {
+    return <span id="status-chip" class="status-chip status-chip--local" title={`${unsyncedCount} event${unsyncedCount !== 1 ? 's' : ''} stored locally`}>Local</span>
+  }
+  if (unsyncedCount > 0) {
+    return <span id="status-chip" class="status-chip status-chip--pending" title={`${unsyncedCount} event${unsyncedCount !== 1 ? 's' : ''} pending sync`}>{unsyncedCount} pending</span>
+  }
+  return <span id="status-chip" class="status-chip status-chip--synced" title="All events synced">Synced</span>
+}
+
+function Board({ board, columns, cards, uiState, tabCount, connStatus }) {
   const isTimeTraveling = uiState?.timeTravelPos >= 0
   const isSelecting = !isTimeTraveling && uiState?.selectionMode
   const isEditingTitle = !isTimeTraveling && uiState?.editingBoardTitle
@@ -991,6 +1024,7 @@ function Board({ board, columns, cards, uiState, tabCount }) {
           : <h1 id="board-title" class={isTimeTraveling ? '' : 'board-title-editable'} {...(!isTimeTraveling ? { 'data-on:click': `@post('${base()}boards/${board.id}/title-edit')` } : {})}>{board.title}</h1>
         }
         <span id="tab-count" class={`tab-count${tabCount > 1 ? '' : ' tab-count--hidden'}`} title={`${tabCount} tabs viewing this board`}>{tabCount > 1 ? `${tabCount} tabs` : ''}</span>
+        {connStatus && <StatusChip isOnline={connStatus.isOnline} unsyncedCount={connStatus.unsyncedCount} hasSyncConfig={connStatus.hasSyncConfig} />}
         {!isSelecting && !isTimeTraveling && (
           <button
             id="select-mode-btn"
@@ -1612,6 +1646,45 @@ input:not(#_), textarea:not(#_), select:not(#_) { font-size: max(1rem, 16px); }
 }
 .tab-count--hidden { display: none; }
 
+/* ── Status chip (offline / local / synced) ──────── */
+
+.status-chip {
+  font-size: 0.7rem;
+  padding: 2px 8px;
+  border-radius: 10px;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.status-chip::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  display: inline-block;
+}
+.status-chip--offline {
+  color: #f87171;
+  background: rgba(248, 113, 113, 0.15);
+}
+.status-chip--offline::before { background: #f87171; }
+.status-chip--local {
+  color: #94a3b8;
+  background: rgba(148, 163, 184, 0.15);
+}
+.status-chip--local::before { background: #94a3b8; }
+.status-chip--pending {
+  color: #fbbf24;
+  background: rgba(251, 191, 36, 0.15);
+}
+.status-chip--pending::before { background: #fbbf24; }
+.status-chip--synced {
+  color: #34d399;
+  background: rgba(52, 211, 153, 0.15);
+}
+.status-chip--synced::before { background: #34d399; }
+
 .select-mode-btn {
   background: #334155;
   border: 1px solid #475569;
@@ -2019,6 +2092,14 @@ function Shell({ path, children }) {
             var action = e.shiftKey ? 'redo' : 'undo';
             fetch('${base()}boards/' + boardId + '/' + action, { method: 'POST' });
           });
+
+          // Notify SW of connection changes so status chip updates
+          window.addEventListener('online', function() {
+            fetch('${base()}connection-change', { method: 'POST' });
+          });
+          window.addEventListener('offline', function() {
+            fetch('${base()}connection-change', { method: 'POST' });
+          });
         `)}</script>
       </body>
     </html>
@@ -2298,7 +2379,8 @@ app.get('/boards/:boardId', async (c) => {
         }
         if (!data) return
         const tabCount = await getTabCount(boardId)
-        await stream.writeSSE(dsePatch(selector, <Board board={data.board} columns={data.columns} cards={data.cards} uiState={ui} tabCount={tabCount} />, mode, opts))
+        const connStatus = await getConnectionStatus()
+        await stream.writeSSE(dsePatch(selector, <Board board={data.board} columns={data.columns} cards={data.cards} uiState={ui} tabCount={tabCount} connStatus={connStatus} />, mode, opts))
       }
 
       const topic = `board:${boardId}:changed`
@@ -2324,9 +2406,10 @@ app.get('/boards/:boardId', async (c) => {
 
   const data = await getBoard(boardId)
   const ui = getUIState(boardId)
+  const connStatus = await getConnectionStatus()
   return c.html('<!DOCTYPE html>' + (
     <Shell path={`/boards/${boardId}`}>
-      {data ? <Board board={data.board} columns={data.columns} cards={data.cards} uiState={ui} tabCount={0} /> : <p>Board not found</p>}
+      {data ? <Board board={data.board} columns={data.columns} cards={data.cards} uiState={ui} tabCount={0} connStatus={connStatus} /> : <p>Board not found</p>}
     </Shell>
   ).toString())
 })
@@ -2785,6 +2868,13 @@ app.post('/boards/:boardId/time-travel/exit', async (c) => {
   ui.timeTravelAllEvents = null
   ui.timeTravelPos = -1
   emitUI(boardId)
+  return c.body(null, 204)
+})
+
+// Client notifies SW of connection change (page online/offline events are more
+// reliable than SW self.online/offline in some browsers / DevTools emulation)
+app.post('/connection-change', async (c) => {
+  notifyConnectionChange()
   return c.body(null, 204)
 })
 
