@@ -433,6 +433,7 @@ function getUIState(boardId) {
       editingBoardTitle: false, // whether the board title is being edited inline
       timeTravelEvents: null,  // array of { seq, type, data, ts } for this board, or null
       timeTravelPos: -1,       // current position in timeTravelEvents (-1 = not active)
+      showHelp: false,         // whether keyboard shortcut help overlay is visible
     })
   }
   return boardUIState.get(boardId)
@@ -1068,6 +1069,38 @@ function TimeTravelBar({ boardId, events, pos }) {
   )
 }
 
+function HelpOverlay({ boardId }) {
+  return (
+    <div id="help-overlay" class="help-overlay-backdrop" data-on:click={`@post('${base()}boards/${boardId}/help-dismiss')`}>
+      <div class="help-overlay" data-on:click__stop="void 0">
+        <div class="help-overlay-header">
+          <span class="help-overlay-title">Keyboard shortcuts</span>
+          <button class="help-overlay-close" data-on:click={`@post('${base()}boards/${boardId}/help-dismiss')`}>×</button>
+        </div>
+        <div class="help-overlay-body">
+          <div class="help-section">
+            <h3 class="help-section-title">Navigate</h3>
+            <div class="help-row"><kbd>{'↑ ↓ ← →'}</kbd><span>Move focus between cards</span></div>
+            <div class="help-row"><kbd>h j k l</kbd><span>Vim-style navigation</span></div>
+          </div>
+          <div class="help-section">
+            <h3 class="help-section-title">Move items</h3>
+            <div class="help-row"><kbd>{'Ctrl + ↑ ↓ ← →'}</kbd><span>Move card or column</span></div>
+            <div class="help-row"><kbd>Ctrl + h j k l</kbd><span>Vim-style move</span></div>
+          </div>
+          <div class="help-section">
+            <h3 class="help-section-title">Actions</h3>
+            <div class="help-row"><kbd>Ctrl + Z</kbd><span>Undo</span></div>
+            <div class="help-row"><kbd>Ctrl + Shift + Z</kbd><span>Redo</span></div>
+            <div class="help-row"><kbd>Escape</kbd><span>Cancel drag / close overlay</span></div>
+            <div class="help-row"><kbd>?</kbd><span>Toggle this help</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function StatusChip({ isOnline, unsyncedCount, hasSyncConfig }) {
   if (!isOnline) {
     return <span id="status-chip" class="status-chip status-chip--offline" title="No network connection">Offline</span>
@@ -1151,6 +1184,9 @@ function Board({ board, columns, cards, uiState, tabCount, connStatus }) {
       )}
       {sheetCol && (
         <ColumnSheet col={sheetCol} colIndex={sheetColIndex} columnCount={columns.length} boardId={board.id} />
+      )}
+      {uiState?.showHelp && (
+        <HelpOverlay boardId={board.id} />
       )}
     </div>
   )
@@ -1860,6 +1896,82 @@ input:not(#_), textarea:not(#_), select:not(#_) { font-size: max(1rem, 16px); }
 .card--selected { border-color: #6366f1; background: #1e1b4b; }
 .card--selected .card-select-checkbox { color: #818cf8; }
 
+/* ── Help overlay ────────────────────────────────── */
+
+.help-overlay-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: grid;
+  place-items: center;
+  z-index: 1000;
+  animation: fade-in 150ms ease-out;
+}
+@keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+
+.help-overlay {
+  background: #1e293b;
+  border: 1px solid #334155;
+  border-radius: 12px;
+  padding: 24px;
+  max-width: 420px;
+  width: calc(100% - 32px);
+  max-height: calc(100vh - 64px);
+  overflow-y: auto;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.4);
+}
+
+.help-overlay-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+.help-overlay-title {
+  font-size: 1rem;
+  font-weight: 600;
+  color: #e2e8f0;
+}
+.help-overlay-close {
+  background: none;
+  border: none;
+  color: #94a3b8;
+  font-size: 1.2rem;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 4px;
+}
+.help-overlay-close:hover { background: #334155; color: #e2e8f0; }
+
+.help-section { margin-bottom: 16px; }
+.help-section:last-child { margin-bottom: 0; }
+.help-section-title {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #64748b;
+  margin-bottom: 8px;
+}
+
+.help-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 4px 0;
+  font-size: 0.85rem;
+  color: #cbd5e1;
+}
+.help-row kbd {
+  background: #0f172a;
+  border: 1px solid #334155;
+  border-radius: 4px;
+  padding: 2px 8px;
+  font-size: 0.75rem;
+  font-family: inherit;
+  color: #e2e8f0;
+  white-space: nowrap;
+}
+
 /* ── Action sheet ────────────────────────────────── */
 
 .action-sheet-backdrop {
@@ -2247,6 +2359,22 @@ function Shell({ path, children }) {
             var boardId = boardMatch[1];
             var action = e.shiftKey ? 'redo' : 'undo';
             fetch('${base()}boards/' + boardId + '/' + action, { method: 'POST' });
+          });
+
+          // ? key → toggle help overlay; Escape → dismiss help overlay
+          document.addEventListener('keydown', function(e) {
+            var tag = (e.target.tagName || '').toLowerCase();
+            if (tag === 'input' || tag === 'textarea') return;
+            var boardMatch = location.pathname.match(/boards\\/([^/]+)/);
+            if (!boardMatch) return;
+            var boardId = boardMatch[1];
+            if (e.key === '?') {
+              e.preventDefault();
+              fetch('${base()}boards/' + boardId + '/help', { method: 'POST' });
+            } else if (e.key === 'Escape' && document.getElementById('help-overlay')) {
+              e.preventDefault();
+              fetch('${base()}boards/' + boardId + '/help-dismiss', { method: 'POST' });
+            }
           });
 
           // Notify SW of connection changes so status chip updates
@@ -3021,6 +3149,24 @@ app.put('/boards/:boardId', async (c) => {
 
   const ui = getUIState(boardId)
   ui.editingBoardTitle = false
+  emitUI(boardId)
+  return c.body(null, 204)
+})
+
+// Help overlay: toggle
+app.post('/boards/:boardId/help', async (c) => {
+  const boardId = c.req.param('boardId')
+  const ui = getUIState(boardId)
+  ui.showHelp = !ui.showHelp
+  emitUI(boardId)
+  return c.body(null, 204)
+})
+
+// Help overlay: dismiss
+app.post('/boards/:boardId/help-dismiss', async (c) => {
+  const boardId = c.req.param('boardId')
+  const ui = getUIState(boardId)
+  ui.showHelp = false
   emitUI(boardId)
   return c.body(null, 204)
 })
