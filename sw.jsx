@@ -399,6 +399,23 @@ function clearUIState(boardId) {
   ui.editingCard = null
 }
 
+// ── Per-board tab presence (via clients API) ─────────────────────────────────
+async function getTabCount(boardId) {
+  const clients = await self.clients.matchAll({ type: 'window' })
+  const boardPath = `${base()}boards/${boardId}`
+  return clients.filter(c => new URL(c.url).pathname === boardPath).length
+}
+
+// Debounced UI push after connection changes settle
+const boardConnDebounce = new Map()
+function notifyTabChange(boardId) {
+  clearTimeout(boardConnDebounce.get(boardId))
+  boardConnDebounce.set(boardId, setTimeout(() => {
+    boardConnDebounce.delete(boardId)
+    bus.dispatchEvent(new CustomEvent(`board:${boardId}:ui`))
+  }, 300))
+}
+
 // Nuclear rebuild: clear projection, replay all events in order.
 // Use when projection is suspected to be out of sync with the event log.
 // Saves a snapshot afterward so future incremental rebuilds can skip replayed events.
@@ -780,7 +797,7 @@ function Column({ col, cards, columnCount, uiState, columns }) {
   )
 }
 
-function Board({ board, columns, cards, uiState }) {
+function Board({ board, columns, cards, uiState, tabCount }) {
   const isSelecting = uiState?.selectionMode
   const selectedCount = uiState?.selectedCards?.size || 0
   const sheetCard = uiState?.activeCardSheet
@@ -792,11 +809,13 @@ function Board({ board, columns, cards, uiState }) {
   const sheetCol = sheetColIndex >= 0 ? columns[sheetColIndex] : null
   return (
     <div id="board">
-      <div class="board-header">
-        <a href={base()} class="back-link">← Boards</a>
-        <h1>{board.title}</h1>
+      <div id="board-header" class="board-header">
+        <a id="board-back" href={base()} class="back-link">← Boards</a>
+        <h1 id="board-title">{board.title}</h1>
+        <span id="tab-count" class={`tab-count${tabCount > 1 ? '' : ' tab-count--hidden'}`} title={`${tabCount} tabs viewing this board`}>{tabCount > 1 ? `${tabCount} tabs` : ''}</span>
         {!isSelecting && (
           <button
+            id="select-mode-btn"
             class="select-mode-btn"
             data-on:click={`@post('${base()}boards/${board.id}/select-mode')`}
           >Select</button>
@@ -1365,6 +1384,16 @@ input:not(#_), textarea:not(#_), select:not(#_) { font-size: max(1rem, 16px); }
 .add-col-form button:hover { background: #475569; }
 
 /* ── Select mode button ───────────────────────────── */
+
+.tab-count {
+  font-size: 0.7rem;
+  color: #6366f1;
+  background: rgba(99, 102, 241, 0.15);
+  padding: 2px 8px;
+  border-radius: 10px;
+  white-space: nowrap;
+}
+.tab-count--hidden { display: none; }
 
 .select-mode-btn {
   background: #334155;
@@ -1977,14 +2006,15 @@ app.get('/boards/:boardId', async (c) => {
         const data = await getBoard(boardId)
         if (!data) return
         const ui = getUIState(boardId)
-        await stream.writeSSE(dsePatch(selector, <Board board={data.board} columns={data.columns} cards={data.cards} uiState={ui} />, mode, opts))
+        const tabCount = await getTabCount(boardId)
+        await stream.writeSSE(dsePatch(selector, <Board board={data.board} columns={data.columns} cards={data.cards} uiState={ui} tabCount={tabCount} />, mode, opts))
       }
 
       const topic = `board:${boardId}:changed`
       const handler = () => pushBoard('#board', 'outer', { useViewTransition: true })
       bus.addEventListener(topic, handler)
 
-      // Also re-push on UI-only changes (action sheet, selection mode)
+      // Also re-push on UI-only changes (action sheet, selection mode, tab count)
       const uiTopic = `board:${boardId}:ui`
       const uiHandler = () => pushBoard('#board', 'outer')
       bus.addEventListener(uiTopic, uiHandler)
@@ -1992,9 +2022,11 @@ app.get('/boards/:boardId', async (c) => {
       stream.onAbort(() => {
         bus.removeEventListener(topic, handler)
         bus.removeEventListener(uiTopic, uiHandler)
+        notifyTabChange(boardId)
       })
 
       await pushBoard('#app', 'inner')
+      notifyTabChange(boardId)
       while (!stream.closed) { await stream.sleep(30000) }
     })
   }
@@ -2003,7 +2035,7 @@ app.get('/boards/:boardId', async (c) => {
   const ui = getUIState(boardId)
   return c.html('<!DOCTYPE html>' + (
     <Shell path={`/boards/${boardId}`}>
-      {data ? <Board board={data.board} columns={data.columns} cards={data.cards} uiState={ui} /> : <p>Board not found</p>}
+      {data ? <Board board={data.board} columns={data.columns} cards={data.cards} uiState={ui} tabCount={0} /> : <p>Board not found</p>}
     </Shell>
   ).toString())
 })
