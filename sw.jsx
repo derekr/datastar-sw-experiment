@@ -76,6 +76,13 @@ async function applyEvent(event, tx) {
       await tx.objectStore('boards').put(data)
       break
 
+    case 'board.titleUpdated': {
+      const board = await tx.objectStore('boards').get(data.id)
+      if (!board) break
+      await tx.objectStore('boards').put({ ...board, title: data.title })
+      break
+    }
+
     case 'board.deleted': {
       await tx.objectStore('boards').delete(data.id)
       // Delete all columns and cards belonging to this board
@@ -338,6 +345,15 @@ async function buildUndoEntry(events) {
         redoEvents.push({ type: 'board.created', data: { ...data } })
         break
 
+      case 'board.titleUpdated': {
+        const board = await db.get('boards', data.id)
+        if (board) {
+          undoEvents.push({ type: 'board.titleUpdated', data: { id: data.id, title: board.title } })
+          redoEvents.push({ type: 'board.titleUpdated', data: { ...data } })
+        }
+        break
+      }
+
       case 'board.deleted': {
         const board = await db.get('boards', data.id)
         if (board) {
@@ -375,7 +391,7 @@ async function appendEventsWithUndo(events, boardId, { isUndoRedo = false } = {}
 // relevant UI baked in (action sheet, selection mode, editing card).
 // No client signals needed — the server is the source of truth for UI mode.
 
-const boardUIState = new Map() // boardId → { activeCardSheet, activeColSheet, selectionMode, selectedCards, editingCard }
+const boardUIState = new Map()
 
 function getUIState(boardId) {
   if (!boardUIState.has(boardId)) {
@@ -385,6 +401,7 @@ function getUIState(boardId) {
       selectionMode: false,    // whether selection mode is active
       selectedCards: new Set(), // set of selected card IDs
       editingCard: null,       // card ID being edited inline, or null
+      editingBoardTitle: false, // whether the board title is being edited inline
     })
   }
   return boardUIState.get(boardId)
@@ -397,6 +414,7 @@ function clearUIState(boardId) {
   ui.selectionMode = false
   ui.selectedCards.clear()
   ui.editingCard = null
+  ui.editingBoardTitle = false
 }
 
 // ── Per-board tab presence (via clients API) ─────────────────────────────────
@@ -799,6 +817,7 @@ function Column({ col, cards, columnCount, uiState, columns }) {
 
 function Board({ board, columns, cards, uiState, tabCount }) {
   const isSelecting = uiState?.selectionMode
+  const isEditingTitle = uiState?.editingBoardTitle
   const selectedCount = uiState?.selectedCards?.size || 0
   const sheetCard = uiState?.activeCardSheet
     ? cards.find(c => c.id === uiState.activeCardSheet) || null
@@ -811,7 +830,18 @@ function Board({ board, columns, cards, uiState, tabCount }) {
     <div id="board">
       <div id="board-header" class="board-header">
         <a id="board-back" href={base()} class="back-link">← Boards</a>
-        <h1 id="board-title">{board.title}</h1>
+        {isEditingTitle
+          ? <form
+              id="board-title-form"
+              class="board-title-form"
+              data-on:submit__prevent={`@put('${base()}boards/${board.id}', {contentType: 'form'})`}
+            >
+              <input id="board-title-input" name="title" type="text" value={board.title} autocomplete="off" />
+              <button type="submit" class="board-title-save">Save</button>
+              <button type="button" class="board-title-cancel" data-on:click={`@post('${base()}boards/${board.id}/title-edit-cancel')`}>Cancel</button>
+            </form>
+          : <h1 id="board-title" class="board-title-editable" data-on:click={`@post('${base()}boards/${board.id}/title-edit')`}>{board.title}</h1>
+        }
         <span id="tab-count" class={`tab-count${tabCount > 1 ? '' : ' tab-count--hidden'}`} title={`${tabCount} tabs viewing this board`}>{tabCount > 1 ? `${tabCount} tabs` : ''}</span>
         {!isSelecting && (
           <button
@@ -1095,6 +1125,35 @@ input:not(#_), textarea:not(#_), select:not(#_) { font-size: max(1rem, 16px); }
   font-size: clamp(1.125rem, 1rem + 1vw, 1.5rem);
   font-weight: 600;
 }
+.board-title-editable { cursor: pointer; }
+.board-title-editable:hover { color: #6366f1; }
+.board-title-form {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.board-title-form input {
+  font-size: clamp(1.125rem, 1rem + 1vw, 1.5rem);
+  font-weight: 600;
+  background: #1e293b;
+  border: 1px solid #475569;
+  border-radius: 6px;
+  color: #e2e8f0;
+  padding: 2px 8px;
+  min-width: 0;
+  width: 20ch;
+}
+.board-title-save, .board-title-cancel {
+  background: #334155;
+  color: #e2e8f0;
+  border: 1px solid #475569;
+  border-radius: 6px;
+  padding: 4px 12px;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+.board-title-save:hover { background: #6366f1; border-color: #6366f1; }
+.board-title-cancel:hover { background: #475569; }
 .back-link {
   color: #6366f1;
   text-decoration: none;
@@ -2417,6 +2476,46 @@ app.post('/cards/:cardId/edit-cancel', async (c) => {
 })
 
 // Selection mode: enter
+// Board title editing: toggle edit mode
+app.post('/boards/:boardId/title-edit', async (c) => {
+  const boardId = c.req.param('boardId')
+  const ui = getUIState(boardId)
+  ui.editingBoardTitle = !ui.editingBoardTitle
+  emitUI(boardId)
+  return c.body(null, 204)
+})
+
+// Board title editing: cancel
+app.post('/boards/:boardId/title-edit-cancel', async (c) => {
+  const boardId = c.req.param('boardId')
+  const ui = getUIState(boardId)
+  ui.editingBoardTitle = false
+  emitUI(boardId)
+  return c.body(null, 204)
+})
+
+// Board title editing: save
+app.put('/boards/:boardId', async (c) => {
+  const boardId = c.req.param('boardId')
+  const body = await c.req.parseBody()
+
+  const db = await dbPromise
+  const board = await db.get('boards', boardId)
+  if (!board) return c.body(null, 404)
+
+  const newTitle = String(body.title || '').trim()
+  if (newTitle && newTitle !== board.title) {
+    const correlationId = crypto.randomUUID()
+    const event = createEvent('board.titleUpdated', { id: boardId, title: newTitle }, { correlationId })
+    await appendEventsWithUndo([event], boardId)
+  }
+
+  const ui = getUIState(boardId)
+  ui.editingBoardTitle = false
+  emitUI(boardId)
+  return c.body(null, 204)
+})
+
 app.post('/boards/:boardId/select-mode', async (c) => {
   const boardId = c.req.param('boardId')
   const ui = getUIState(boardId)
@@ -2424,6 +2523,7 @@ app.post('/boards/:boardId/select-mode', async (c) => {
   ui.selectedCards.clear()
   ui.activeCardSheet = null
   ui.editingCard = null
+  ui.editingBoardTitle = false
   emitUI(boardId)
   return c.body(null, 204)
 })
