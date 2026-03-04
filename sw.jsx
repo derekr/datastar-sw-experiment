@@ -2280,15 +2280,25 @@ function Shell({ path, children }) {
 
           // Initialize eg-kanban when #board appears.
           // Runs on mutations (SSE morph) AND immediately for pre-rendered content.
+          // Track the DOM node reference so we re-init if Idiomorph replaces #board.
           var kanbanCleanup = null;
+          var kanbanBoardEl = null;
           function checkKanban() {
             var board = document.getElementById('board');
+            // If #board is a different DOM node than what we initialized, tear down old one
+            if (board && kanbanCleanup && board !== kanbanBoardEl) {
+              kanbanCleanup();
+              kanbanCleanup = null;
+              kanbanBoardEl = null;
+            }
             if (board && !kanbanCleanup && window.initKanban) {
               kanbanCleanup = window.initKanban(board);
+              kanbanBoardEl = board;
             }
             if (!board && kanbanCleanup) {
               kanbanCleanup();
               kanbanCleanup = null;
+              kanbanBoardEl = null;
             }
           }
           var boardObserver = new MutationObserver(checkKanban);
