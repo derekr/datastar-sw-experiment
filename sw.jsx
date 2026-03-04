@@ -2149,6 +2149,16 @@ function Shell({ path, children }) {
           }
           navigator.storage?.persist?.();
 
+          // Haptic feedback via Vibration API (no-op on desktop / unsupported browsers)
+          var _noHaptics = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+          function haptic(pattern) {
+            if (_noHaptics || !navigator.vibrate) return;
+            navigator.vibrate(pattern);
+          }
+          haptic.tap = function() { haptic(8); };
+          haptic.drop = function() { haptic(15); };
+          haptic.warn = function() { haptic([12, 40, 12]); };
+
           // Initialize eg-kanban when #board appears.
           // Runs on mutations (SSE morph) AND immediately for pre-rendered content.
           var kanbanCleanup = null;
@@ -2188,6 +2198,7 @@ function Shell({ path, children }) {
           document.getElementById('app').addEventListener('kanban-card-drag-end', function(e) {
             var d = e.detail;
             if (!d.columnId || !d.cardId) return;
+            haptic.drop();
             pendingFocus = { cardId: d.cardId };
             fetch('${base()}cards/' + d.cardId + '/move', {
               method: 'PUT',
@@ -2200,6 +2211,7 @@ function Shell({ path, children }) {
           document.getElementById('app').addEventListener('kanban-card-tap', function(e) {
             var d = e.detail;
             if (!d.cardId) return;
+            haptic.tap();
             fetch('${base()}cards/' + d.cardId + '/sheet', { method: 'POST' });
           });
 
@@ -2207,12 +2219,14 @@ function Shell({ path, children }) {
           document.getElementById('app').addEventListener('kanban-column-tap', function(e) {
             var d = e.detail;
             if (!d.columnId) return;
+            haptic.tap();
             fetch('${base()}columns/' + d.columnId + '/sheet', { method: 'POST' });
           });
 
           document.getElementById('app').addEventListener('kanban-column-drag-end', function(e) {
             var d = e.detail;
             if (!d.columnId) return;
+            haptic.drop();
             pendingFocus = { columnId: d.columnId };
             fetch('${base()}columns/' + d.columnId + '/move', {
               method: 'PUT',
@@ -2242,6 +2256,19 @@ function Shell({ path, children }) {
           window.addEventListener('offline', function() {
             fetch('${base()}connection-change', { method: 'POST' });
           });
+
+          // Haptic feedback on Datastar-driven actions via event delegation
+          document.getElementById('app').addEventListener('click', function(e) {
+            var t = e.target;
+            if (!t || !t.closest) return;
+            if (t.closest('.action-sheet-btn--danger') || t.closest('.delete-btn')) {
+              haptic.warn();
+            } else if (t.closest('.card-select-checkbox') || t.closest('.card--selected') || t.closest('[data-on\\\\:click*="toggle-select"]')) {
+              haptic.tap();
+            } else if (t.closest('.label-swatch')) {
+              haptic.tap();
+            }
+          }, true);
         `)}</script>
       </body>
     </html>
