@@ -434,6 +434,8 @@ function getUIState(boardId) {
       timeTravelEvents: null,  // array of { seq, type, data, ts } for this board, or null
       timeTravelPos: -1,       // current position in timeTravelEvents (-1 = not active)
       showHelp: false,         // whether keyboard shortcut help overlay is visible
+      commandMenu: null,       // { query: string, selectedIndex: number } or null when closed
+      highlightCard: null,     // card ID to highlight (scroll-into-view + pulse), or null
     })
   }
   return boardUIState.get(boardId)
@@ -811,10 +813,11 @@ function Card({ card, uiState }) {
   const isEditing = !isReadOnly && uiState?.editingCard === card.id
   const isSelecting = !isReadOnly && uiState?.selectionMode
   const isSelected = uiState?.selectedCards?.has(card.id)
+  const isHighlighted = uiState?.highlightCard === card.id
 
   return (
     <div
-      class={`card${isSelected ? ' card--selected' : ''}${label ? ' card--labeled' : ''}`}
+      class={`card${isSelected ? ' card--selected' : ''}${label ? ' card--labeled' : ''}${isHighlighted ? ' card--highlighted' : ''}`}
       id={`card-${card.id}`}
       data-card-id={card.id}
       tabindex="0"
@@ -1092,10 +1095,64 @@ function HelpOverlay({ boardId }) {
             <h3 class="help-section-title">Actions</h3>
             <div class="help-row"><kbd>Ctrl + Z</kbd><span>Undo</span></div>
             <div class="help-row"><kbd>Ctrl + Shift + Z</kbd><span>Redo</span></div>
+            <div class="help-row"><kbd>{'\u2318'}K</kbd><span>Search cards</span></div>
             <div class="help-row"><kbd>Escape</kbd><span>Cancel drag / close overlay</span></div>
             <div class="help-row"><kbd>?</kbd><span>Toggle this help</span></div>
           </div>
         </div>
+      </div>
+    </div>
+  )
+}
+
+function CommandMenu({ boardId, query, results, selectedIndex, columns }) {
+  // Build a column lookup for showing which column each card is in
+  const colMap = {}
+  for (const col of columns) colMap[col.id] = col.title
+  return (
+    <div id="command-menu" class="command-menu-backdrop" data-on:click={`@post('${base()}boards/${boardId}/command-menu-close')`}>
+      <div class="command-menu" data-on:click__stop="void 0">
+        <form id="command-menu-form" data-on:submit__prevent="void 0">
+          <div class="command-menu-input-wrap">
+            <span class="command-menu-icon">{'\u2315'}</span>
+            <input
+              id="command-menu-input"
+              class="command-menu-input"
+              type="text"
+              placeholder="Search cards..."
+              value={query}
+              autocomplete="off"
+              data-on:input__debounce_150ms={`@post('${base()}boards/${boardId}/command-menu-search', {contentType: 'form'})`}
+              data-on:keydown={`
+                if (event.key === 'ArrowDown') { event.preventDefault(); @post('${base()}boards/${boardId}/command-menu-nav', {headers: {'X-Dir': 'down'}}); }
+                else if (event.key === 'ArrowUp') { event.preventDefault(); @post('${base()}boards/${boardId}/command-menu-nav', {headers: {'X-Dir': 'up'}}); }
+                else if (event.key === 'Enter') { event.preventDefault(); @post('${base()}boards/${boardId}/command-menu-select'); }
+                else if (event.key === 'Escape') { event.preventDefault(); @post('${base()}boards/${boardId}/command-menu-close'); }
+              `}
+              name="query"
+            />
+          </div>
+        </form>
+        {results.length > 0 ? (
+          <ul class="command-menu-results">
+            {results.map((r, i) => (
+              <li
+                class={`command-menu-result${i === selectedIndex ? ' command-menu-result--active' : ''}`}
+                data-on:click={`@post('${base()}boards/${boardId}/command-menu-go/${r.id}')`}
+              >
+                <span class="command-menu-result-title">
+                  {r.label && <span class="command-menu-label-dot" style={`background: ${LABEL_COLORS[r.label] || '#64748b'}`}>{' '}</span>}
+                  {r.title}
+                </span>
+                <span class="command-menu-result-col">{colMap[r.columnId] || ''}</span>
+              </li>
+            ))}
+          </ul>
+        ) : query ? (
+          <div class="command-menu-empty">No cards found</div>
+        ) : (
+          <div class="command-menu-hint">Type to search across all cards</div>
+        )}
       </div>
     </div>
   )
@@ -1187,6 +1244,15 @@ function Board({ board, columns, cards, uiState, tabCount, connStatus }) {
       )}
       {uiState?.showHelp && (
         <HelpOverlay boardId={board.id} />
+      )}
+      {uiState?.commandMenu && (
+        <CommandMenu
+          boardId={board.id}
+          query={uiState.commandMenu.query}
+          results={uiState.commandMenu.results || []}
+          selectedIndex={uiState.commandMenu.selectedIndex}
+          columns={columns}
+        />
       )}
     </div>
   )
@@ -1972,6 +2038,127 @@ input:not(#_), textarea:not(#_), select:not(#_) { font-size: max(1rem, 16px); }
   white-space: nowrap;
 }
 
+/* ── Card highlight (search result) ──────────────── */
+
+.card--highlighted {
+  outline: 2px solid #38bdf8;
+  outline-offset: 2px;
+  animation: card-highlight-pulse 1.5s ease-in-out 2;
+}
+@keyframes card-highlight-pulse {
+  0%, 100% { outline-color: #38bdf8; box-shadow: 0 0 0 0 rgba(56, 189, 248, 0); }
+  50% { outline-color: #7dd3fc; box-shadow: 0 0 12px 2px rgba(56, 189, 248, 0.3); }
+}
+
+/* ── Command menu (Cmd+K) ────────────────────────── */
+
+.command-menu-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding-top: min(20vh, 120px);
+  z-index: 1100;
+  animation: fade-in 150ms ease-out;
+}
+
+.command-menu {
+  background: #1e293b;
+  border: 1px solid #334155;
+  border-radius: 12px;
+  width: min(520px, calc(100% - 32px));
+  max-height: calc(100vh - 180px);
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+}
+
+.command-menu-input-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  border-bottom: 1px solid #334155;
+}
+
+.command-menu-icon {
+  color: #64748b;
+  font-size: 1.1rem;
+  flex-shrink: 0;
+}
+
+.command-menu-input {
+  flex: 1;
+  background: none;
+  border: none;
+  outline: none;
+  color: #e2e8f0;
+  font-size: 1rem;
+  font-family: inherit;
+}
+.command-menu-input::placeholder { color: #64748b; }
+
+.command-menu-results {
+  list-style: none;
+  margin: 0;
+  padding: 8px 0;
+  overflow-y: auto;
+}
+
+.command-menu-result {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 16px;
+  cursor: pointer;
+  color: #cbd5e1;
+  font-size: 0.9rem;
+  gap: 12px;
+}
+.command-menu-result:hover { background: #334155; }
+.command-menu-result--active {
+  background: #334155;
+  color: #f1f5f9;
+}
+
+.command-menu-result-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.command-menu-label-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  display: inline-block;
+  font-size: 0;
+  line-height: 0;
+}
+
+.command-menu-result-col {
+  color: #64748b;
+  font-size: 0.8rem;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.command-menu-empty,
+.command-menu-hint {
+  padding: 16px;
+  text-align: center;
+  color: #64748b;
+  font-size: 0.9rem;
+}
+
 /* ── Action sheet ────────────────────────────────── */
 
 .action-sheet-backdrop {
@@ -2311,7 +2498,20 @@ function Shell({ path, children }) {
           // Focus restoration after SSE morph: save the focused element's
           // identity before the morph replaces the DOM, then re-focus it.
           var pendingFocus = null;
+          var _lastCmdMenuSeen = false;
           var focusObserver = new MutationObserver(function() {
+            // Auto-focus command menu input when it first appears
+            var cmdMenu = document.getElementById('command-menu');
+            if (cmdMenu && !_lastCmdMenuSeen) {
+              var cmdInput = document.getElementById('command-menu-input');
+              if (cmdInput) cmdInput.focus();
+            }
+            _lastCmdMenuSeen = !!cmdMenu;
+            // Scroll highlighted card into view (command menu search result)
+            var highlighted = document.querySelector('.card--highlighted');
+            if (highlighted) {
+              highlighted.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
+            }
             if (!pendingFocus) return;
             var el = null;
             if (pendingFocus.cardId) {
@@ -2378,9 +2578,33 @@ function Shell({ path, children }) {
             fetch('${base()}boards/' + boardId + '/' + action, { method: 'POST' });
           });
 
-          // ? key → toggle help overlay; Escape → dismiss help overlay
+          // Cmd+K → toggle command menu
+          document.addEventListener('keydown', function(e) {
+            if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+              e.preventDefault();
+              var boardMatch = location.pathname.match(/boards\\/([^/]+)/);
+              if (!boardMatch) return;
+              fetch('${base()}boards/' + boardMatch[1] + '/command-menu', { method: 'POST' });
+            }
+          });
+
+          // ? key → toggle help overlay; Escape → dismiss overlays
           document.addEventListener('keydown', function(e) {
             var tag = (e.target.tagName || '').toLowerCase();
+            // Escape should work even from command menu input
+            if (e.key === 'Escape') {
+              var boardMatch = location.pathname.match(/boards\\/([^/]+)/);
+              if (!boardMatch) return;
+              var boardId = boardMatch[1];
+              if (document.getElementById('command-menu')) {
+                e.preventDefault();
+                fetch('${base()}boards/' + boardId + '/command-menu-close', { method: 'POST' });
+              } else if (document.getElementById('help-overlay')) {
+                e.preventDefault();
+                fetch('${base()}boards/' + boardId + '/help-dismiss', { method: 'POST' });
+              }
+              return;
+            }
             if (tag === 'input' || tag === 'textarea') return;
             var boardMatch = location.pathname.match(/boards\\/([^/]+)/);
             if (!boardMatch) return;
@@ -2388,9 +2612,6 @@ function Shell({ path, children }) {
             if (e.key === '?') {
               e.preventDefault();
               fetch('${base()}boards/' + boardId + '/help', { method: 'POST' });
-            } else if (e.key === 'Escape' && document.getElementById('help-overlay')) {
-              e.preventDefault();
-              fetch('${base()}boards/' + boardId + '/help-dismiss', { method: 'POST' });
             }
           });
 
@@ -3185,6 +3406,123 @@ app.post('/boards/:boardId/help-dismiss', async (c) => {
   const ui = getUIState(boardId)
   ui.showHelp = false
   emitUI(boardId)
+  return c.body(null, 204)
+})
+
+// Command menu: open
+app.post('/boards/:boardId/command-menu', async (c) => {
+  await initialize()
+  const boardId = c.req.param('boardId')
+  const ui = getUIState(boardId)
+  if (ui.commandMenu) {
+    // Toggle off if already open
+    ui.commandMenu = null
+  } else {
+    ui.commandMenu = { query: '', selectedIndex: 0, results: [] }
+  }
+  emitUI(boardId)
+  return c.body(null, 204)
+})
+
+// Command menu: close
+app.post('/boards/:boardId/command-menu-close', async (c) => {
+  const boardId = c.req.param('boardId')
+  const ui = getUIState(boardId)
+  ui.commandMenu = null
+  emitUI(boardId)
+  return c.body(null, 204)
+})
+
+// Command menu: search
+app.post('/boards/:boardId/command-menu-search', async (c) => {
+  await initialize()
+  const boardId = c.req.param('boardId')
+  const body = await c.req.parseBody()
+  const query = (body.query || '').trim().toLowerCase()
+  const ui = getUIState(boardId)
+  if (!ui.commandMenu) return c.body(null, 204)
+
+  if (!query) {
+    ui.commandMenu.query = ''
+    ui.commandMenu.results = []
+    ui.commandMenu.selectedIndex = 0
+    emitUI(boardId)
+    return c.body(null, 204)
+  }
+
+  const data = await getBoard(boardId)
+  if (!data) return c.body(null, 404)
+
+  const results = data.cards
+    .filter(card => {
+      const title = (card.title || '').toLowerCase()
+      const desc = (card.description || '').toLowerCase()
+      return title.includes(query) || desc.includes(query)
+    })
+    .sort(cmpPosition)
+    .slice(0, 20) // cap results
+    .map(card => ({ id: card.id, title: card.title, label: card.label || null, columnId: card.columnId }))
+
+  ui.commandMenu.query = body.query || ''
+  ui.commandMenu.results = results
+  ui.commandMenu.selectedIndex = Math.min(ui.commandMenu.selectedIndex, Math.max(0, results.length - 1))
+  emitUI(boardId)
+  return c.body(null, 204)
+})
+
+// Command menu: navigate (arrow keys)
+app.post('/boards/:boardId/command-menu-nav', async (c) => {
+  const boardId = c.req.param('boardId')
+  const dir = c.req.header('X-Dir')
+  const ui = getUIState(boardId)
+  if (!ui.commandMenu || !ui.commandMenu.results.length) return c.body(null, 204)
+  const len = ui.commandMenu.results.length
+  if (dir === 'down') {
+    ui.commandMenu.selectedIndex = (ui.commandMenu.selectedIndex + 1) % len
+  } else if (dir === 'up') {
+    ui.commandMenu.selectedIndex = (ui.commandMenu.selectedIndex - 1 + len) % len
+  }
+  emitUI(boardId)
+  return c.body(null, 204)
+})
+
+// Command menu: select (Enter — go to the selected result)
+app.post('/boards/:boardId/command-menu-select', async (c) => {
+  const boardId = c.req.param('boardId')
+  const ui = getUIState(boardId)
+  if (!ui.commandMenu || !ui.commandMenu.results.length) return c.body(null, 204)
+  const selected = ui.commandMenu.results[ui.commandMenu.selectedIndex]
+  if (!selected) return c.body(null, 204)
+  // Close menu and set highlight
+  ui.commandMenu = null
+  ui.highlightCard = selected.id
+  emitUI(boardId)
+  // Clear highlight after a delay (3s)
+  setTimeout(() => {
+    const u = getUIState(boardId)
+    if (u.highlightCard === selected.id) {
+      u.highlightCard = null
+      emitUI(boardId)
+    }
+  }, 3000)
+  return c.body(null, 204)
+})
+
+// Command menu: go directly to a card (click on result)
+app.post('/boards/:boardId/command-menu-go/:cardId', async (c) => {
+  const boardId = c.req.param('boardId')
+  const cardId = c.req.param('cardId')
+  const ui = getUIState(boardId)
+  ui.commandMenu = null
+  ui.highlightCard = cardId
+  emitUI(boardId)
+  setTimeout(() => {
+    const u = getUIState(boardId)
+    if (u.highlightCard === cardId) {
+      u.highlightCard = null
+      emitUI(boardId)
+    }
+  }, 3000)
   return c.body(null, 204)
 })
 
