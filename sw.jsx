@@ -936,12 +936,21 @@ function BoardsList({ boards }) {
 const CSS = `
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
+/* Remove 300ms tap delay on all interactive elements */
+a, button, input, textarea, select, [data-on\\:click], [tabindex] {
+  touch-action: manipulation;
+}
+
 body {
   font-family: system-ui, -apple-system, sans-serif;
   background: #0f172a;
   color: #e2e8f0;
   min-height: 100dvh;
   -webkit-text-size-adjust: 100%;
+  overscroll-behavior: none;
+  /* Safe area insets for notched devices (landscape) */
+  padding-left: env(safe-area-inset-left, 0px);
+  padding-right: env(safe-area-inset-right, 0px);
 }
 
 /* ── Boards list ─────────────────────────────────────── */
@@ -1008,6 +1017,10 @@ body {
   flex-direction: column;
   gap: 8px;
 }
+/* 16px min on all inputs/textareas prevents iOS Safari auto-zoom on focus.
+   Doubled selector for specificity to beat .class input rules. */
+input:not(#_), textarea:not(#_), select:not(#_) { font-size: max(1rem, 16px); }
+
 .board-new input {
   background: #0f172a;
   border: 1px solid #334155;
@@ -1083,6 +1096,8 @@ body {
   align-items: flex-start;
   /* Momentum scrolling on iOS */
   -webkit-overflow-scrolling: touch;
+  /* Prevent horizontal overscroll from triggering back-navigation */
+  overscroll-behavior-x: contain;
   /* Snap columns into view on swipe */
   scroll-snap-type: x mandatory;
   scroll-padding: 0 clamp(8px, 2vw, 24px);
@@ -1121,6 +1136,7 @@ body {
   gap: 8px;
   margin-bottom: 12px;
   cursor: grab;
+  -webkit-touch-callout: none;
 }
 
 .column-header:focus-visible { outline: none; box-shadow: 0 0 0 2px #6366f1; border-radius: 6px; }
@@ -1193,6 +1209,7 @@ body {
   cursor: grab;
   transition: border-color 0.15s;
   user-select: none;
+  -webkit-touch-callout: none;
 }
 
 .card:hover { border-color: #475569; }
@@ -1400,6 +1417,7 @@ body {
   background: #1e293b;
   border-radius: 16px 16px 0 0;
   padding: 16px;
+  padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px));
   width: 100%;
   max-width: 400px;
   max-height: 80vh;
@@ -1474,6 +1492,7 @@ body {
   background: #1e293b;
   border-top: 1px solid #334155;
   padding: 12px clamp(12px, 4vw, 24px);
+  padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px));
   display: flex;
   align-items: center;
   gap: 12px;
@@ -1569,7 +1588,7 @@ function Shell({ path, children }) {
     <html lang="en">
       <head>
         <meta charset="UTF-8" />
-        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
         <title>Kanban</title>
         <style>{raw(CSS)}</style>
         <script
