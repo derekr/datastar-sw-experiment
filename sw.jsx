@@ -1589,6 +1589,12 @@ function Shell({ path, children }) {
       <head>
         <meta charset="UTF-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+        <meta name="theme-color" content="#0f172a" />
+        <meta name="mobile-web-app-capable" content="yes" />
+        <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+        <link rel="manifest" href={`${base()}manifest.json`} />
+        <link rel="icon" href={`${base()}icon.svg`} type="image/svg+xml" />
+        <link rel="apple-touch-icon" href={`${base()}icon-192.png`} />
         <title>Kanban</title>
         <style>{raw(CSS)}</style>
         <script
@@ -1839,7 +1845,10 @@ function EventsPage() {
     <html lang="en">
       <head>
         <meta charset="UTF-8" />
-        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+        <meta name="theme-color" content="#0f172a" />
+        <link rel="manifest" href={`${base()}manifest.json`} />
+        <link rel="icon" href={`${base()}icon.svg`} type="image/svg+xml" />
         <title>Event Log</title>
         <style>{raw(EVENTS_CSS)}</style>
         <script
@@ -2536,6 +2545,10 @@ self.addEventListener('activate', (event) => event.waitUntil(self.clients.claim(
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url)
   if (url.origin !== self.location.origin) return
+  // Let static assets fall through to network/cache.
+  // The SW only serves HTML (Hono routes) and SSE streams — all other file
+  // types (JS, CSS, images, manifest) are served by the host (Vite / GH Pages).
+  if (/\.(js|css|png|svg|ico|woff2?|json|webmanifest)(\?.*)?$/.test(url.pathname)) return
   // Strip the SW scope prefix so Hono routes match regardless of base path.
   // e.g. /datastar-sw-experiment/boards/123 → /boards/123
   const scope = new URL(self.registration.scope).pathname

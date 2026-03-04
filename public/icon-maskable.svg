@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Full background for maskable icon (safe zone is inner 80%) -->
+  <rect width="512" height="512" fill="#0f172a"/>
+  <!-- Three kanban columns - scaled down to fit safe zone -->
+  <rect x="96" y="136" width="88" height="240" rx="12" fill="#1e293b"/>
+  <rect x="212" y="136" width="88" height="240" rx="12" fill="#1e293b"/>
+  <rect x="328" y="136" width="88" height="240" rx="12" fill="#1e293b"/>
+  <!-- Cards -->
+  <rect x="108" y="168" width="64" height="40" rx="6" fill="#6366f1"/>
+  <rect x="108" y="220" width="64" height="40" rx="6" fill="#334155"/>
+  <rect x="108" y="272" width="64" height="40" rx="6" fill="#334155"/>
+  <rect x="224" y="168" width="64" height="40" rx="6" fill="#334155"/>
+  <rect x="224" y="220" width="64" height="40" rx="6" fill="#334155"/>
+  <rect x="340" y="168" width="64" height="40" rx="6" fill="#334155"/>
+</svg>

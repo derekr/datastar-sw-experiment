@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="96" fill="#0f172a"/>
+  <!-- Three kanban columns -->
+  <rect x="56" y="96" width="112" height="320" rx="16" fill="#1e293b"/>
+  <rect x="200" y="96" width="112" height="320" rx="16" fill="#1e293b"/>
+  <rect x="344" y="96" width="112" height="320" rx="16" fill="#1e293b"/>
+  <!-- Cards in columns -->
+  <rect x="72" y="136" width="80" height="48" rx="8" fill="#6366f1"/>
+  <rect x="72" y="200" width="80" height="48" rx="8" fill="#334155"/>
+  <rect x="72" y="264" width="80" height="48" rx="8" fill="#334155"/>
+  <rect x="216" y="136" width="80" height="48" rx="8" fill="#334155"/>
+  <rect x="216" y="200" width="80" height="48" rx="8" fill="#334155"/>
+  <rect x="360" y="136" width="80" height="48" rx="8" fill="#334155"/>
+</svg>
