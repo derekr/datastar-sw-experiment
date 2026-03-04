@@ -370,6 +370,33 @@ async function appendEventsWithUndo(events, boardId, { isUndoRedo = false } = {}
   ))
 }
 
+// --- Server-tracked UI state ---
+// In-memory, per-board. Mutations push a full board morph with the
+// relevant UI baked in (action sheet, selection mode, editing card).
+// No client signals needed — the server is the source of truth for UI mode.
+
+const boardUIState = new Map() // boardId → { activeCardSheet, selectionMode, selectedCards, editingCard }
+
+function getUIState(boardId) {
+  if (!boardUIState.has(boardId)) {
+    boardUIState.set(boardId, {
+      activeCardSheet: null,   // card ID whose action sheet is open, or null
+      selectionMode: false,    // whether selection mode is active
+      selectedCards: new Set(), // set of selected card IDs
+      editingCard: null,       // card ID being edited inline, or null
+    })
+  }
+  return boardUIState.get(boardId)
+}
+
+function clearUIState(boardId) {
+  const ui = getUIState(boardId)
+  ui.activeCardSheet = null
+  ui.selectionMode = false
+  ui.selectedCards.clear()
+  ui.editingCard = null
+}
+
 // Nuclear rebuild: clear projection, replay all events in order.
 // Use when projection is suspected to be out of sync with the event log.
 // Saves a snapshot afterward so future incremental rebuilds can skip replayed events.
@@ -578,50 +605,101 @@ function dsePatch(selector, jsx, mode = 'outer', { useViewTransition = false } =
 
 // --- Components ---
 
-function Card({ card }) {
+function Card({ card, uiState }) {
   const desc = card.description || ''
+  const isEditing = uiState?.editingCard === card.id
+  const isSelecting = uiState?.selectionMode
+  const isSelected = uiState?.selectedCards?.has(card.id)
+
   return (
     <div
-      class="card"
+      class={`card${isSelected ? ' card--selected' : ''}`}
       id={`card-${card.id}`}
       data-card-id={card.id}
       tabindex="0"
-      style="touch-action: none"
     >
+      {isSelecting && (
+        <button
+          class="card-select-checkbox"
+          data-on:click={`@post('${base()}cards/${card.id}/toggle-select')`}
+        >{isSelected ? '\u2611' : '\u2610'}</button>
+      )}
       <div class="card-content">
         <span class="card-title">{card.title}</span>
         {desc && <p class="card-desc">{desc}</p>}
       </div>
-      <div class="card-actions">
-        <button
-          class="card-edit-btn"
-          data-on:click={`$editingCard = $editingCard === '${card.id}' ? '' : '${card.id}'`}
-          title="Edit"
-        >&#9998;</button>
-        <button
-          class="delete-btn"
-          data-on:click__viewtransition={`@delete('${base()}cards/${card.id}')`}
-        >
-          ×
-        </button>
-      </div>
-      <form
-        class="card-edit-form"
-        data-show={`$editingCard === '${card.id}'`}
-        data-on:submit__prevent={`@put('${base()}cards/${card.id}', {contentType: 'form'}); $editingCard = ''`}
-      >
-        <input name="title" type="text" value={card.title} placeholder="Title" autocomplete="off" />
-        <textarea name="description" placeholder="Description (optional)" rows="2">{desc}</textarea>
-        <div class="card-edit-actions">
-          <button type="submit">Save</button>
-          <button type="button" data-on:click="$editingCard = ''">Cancel</button>
+      {!isSelecting && (
+        <div class="card-actions">
+          <button
+            class="card-edit-btn"
+            data-on:click={`@post('${base()}cards/${card.id}/edit')`}
+            title="Edit"
+          >&#9998;</button>
+          <button
+            class="delete-btn"
+            data-on:click__viewtransition={`@delete('${base()}cards/${card.id}')`}
+          >
+            ×
+          </button>
         </div>
-      </form>
+      )}
+      {isEditing && (
+        <form
+          class="card-edit-form"
+          data-on:submit__prevent={`@put('${base()}cards/${card.id}', {contentType: 'form'})`}
+        >
+          <input name="title" type="text" value={card.title} placeholder="Title" autocomplete="off" />
+          <textarea name="description" placeholder="Description (optional)" rows="2">{desc}</textarea>
+          <div class="card-edit-actions">
+            <button type="submit">Save</button>
+            <button type="button" data-on:click={`@post('${base()}cards/${card.id}/edit-cancel')`}>Cancel</button>
+          </div>
+        </form>
+      )}
     </div>
   )
 }
 
-function Column({ col, cards, columnCount }) {
+function ActionSheet({ card, columns }) {
+  // Show "Move to" buttons for every column except the card's current one
+  const otherColumns = columns.filter(c => c.id !== card.columnId)
+  return (
+    <div class="action-sheet-backdrop" data-on:click={`@post('${base()}cards/sheet/dismiss')`}>
+      <div class="action-sheet" data-on:click__stop="void 0">
+        <div class="action-sheet-header">
+          <span class="action-sheet-title">{card.title}</span>
+        </div>
+        {otherColumns.length > 0 && (
+          <div class="action-sheet-section">
+            <span class="action-sheet-label">Move to</span>
+            {otherColumns.map(col => (
+              <button
+                class="action-sheet-btn"
+                data-on:click={`@post('${base()}cards/${card.id}/sheet-move/${col.id}')`}
+              >{col.title}</button>
+            ))}
+          </div>
+        )}
+        <div class="action-sheet-section">
+          <button
+            class="action-sheet-btn"
+            data-on:click={`@post('${base()}cards/${card.id}/edit')`}
+          >Edit</button>
+          <button
+            class="action-sheet-btn action-sheet-btn--danger"
+            data-on:click__viewtransition={`@delete('${base()}cards/${card.id}')`}
+          >Delete</button>
+        </div>
+        <button
+          class="action-sheet-btn action-sheet-btn--cancel"
+          data-on:click={`@post('${base()}cards/sheet/dismiss')`}
+        >Cancel</button>
+      </div>
+    </div>
+  )
+}
+
+function Column({ col, cards, columnCount, uiState, columns }) {
   const colCards = cards
     .filter(c => c.columnId === col.id)
     .sort(cmpPosition)
@@ -630,7 +708,7 @@ function Column({ col, cards, columnCount }) {
     <div
       class="column"
       id={`column-${col.id}`}
-      style={`view-transition-name: col-${col.id}; view-transition-class: col; touch-action: none`}
+      style={`view-transition-name: col-${col.id}; view-transition-class: col`}
     >
       <div class="column-header" tabindex="0">
         <h2>{col.title}</h2>
@@ -645,36 +723,91 @@ function Column({ col, cards, columnCount }) {
       <div class="cards-container" data-column-id={col.id}>
         {colCards.length === 0
           ? <p class="empty">No cards yet</p>
-          : colCards.map(card => <Card card={card} />)}
+          : colCards.map(card => <Card card={card} uiState={uiState} />)}
       </div>
-      <form
-        class="add-form"
-        data-on:submit__prevent__viewtransition={`@post('${base()}columns/${col.id}/cards', {contentType: 'form'}); evt.target.reset()`}
-      >
-        <input name="title" type="text" placeholder="Add a card..." autocomplete="off" />
-        <button type="submit">+</button>
-      </form>
+      {!uiState?.selectionMode && (
+        <form
+          class="add-form"
+          data-on:submit__prevent__viewtransition={`@post('${base()}columns/${col.id}/cards', {contentType: 'form'}); evt.target.reset()`}
+        >
+          <input name="title" type="text" placeholder="Add a card..." autocomplete="off" />
+          <button type="submit">+</button>
+        </form>
+      )}
     </div>
   )
 }
 
-function Board({ board, columns, cards }) {
+function Board({ board, columns, cards, uiState }) {
+  const isSelecting = uiState?.selectionMode
+  const selectedCount = uiState?.selectedCards?.size || 0
+  const sheetCard = uiState?.activeCardSheet
+    ? cards.find(c => c.id === uiState.activeCardSheet) || null
+    : null
   return (
-    <div id="board" data-signals="{editingCard: ''}">
+    <div id="board">
       <div class="board-header">
         <a href={base()} class="back-link">← Boards</a>
         <h1>{board.title}</h1>
+        {!isSelecting && (
+          <button
+            class="select-mode-btn"
+            data-on:click={`@post('${base()}boards/${board.id}/select-mode')`}
+          >Select</button>
+        )}
       </div>
       <div class="columns">
-        {columns.map(col => <Column col={col} cards={cards} columnCount={columns.length} />)}
+        {columns.map(col => (
+          <Column col={col} cards={cards} columnCount={columns.length} uiState={uiState} columns={columns} />
+        ))}
       </div>
-      <form
-        class="add-col-form"
-        data-on:submit__prevent__viewtransition={`@post('${base()}boards/${board.id}/columns', {contentType: 'form'}); evt.target.reset()`}
-      >
-        <input name="title" type="text" placeholder="Add a column..." autocomplete="off" />
-        <button type="submit">+ Column</button>
-      </form>
+      {!isSelecting && (
+        <form
+          class="add-col-form"
+          data-on:submit__prevent__viewtransition={`@post('${base()}boards/${board.id}/columns', {contentType: 'form'}); evt.target.reset()`}
+        >
+          <input name="title" type="text" placeholder="Add a column..." autocomplete="off" />
+          <button type="submit">+ Column</button>
+        </form>
+      )}
+      {isSelecting && (
+        <SelectionBar boardId={board.id} columns={columns} selectedCount={selectedCount} />
+      )}
+      {sheetCard && (
+        <ActionSheet card={sheetCard} columns={columns} />
+      )}
+    </div>
+  )
+}
+
+function SelectionBar({ boardId, columns, selectedCount }) {
+  return (
+    <div class="selection-bar" data-signals="{showColumnPicker: false}">
+      <span class="selection-bar-count">{selectedCount} selected</span>
+      <div class="selection-bar-actions">
+        <button
+          class="selection-bar-btn"
+          data-on:click="$showColumnPicker = !$showColumnPicker"
+          disabled={selectedCount === 0}
+        >Move to…</button>
+        <div class="column-picker" data-show="$showColumnPicker">
+          {columns.map(col => (
+            <button
+              class="column-picker-btn"
+              data-on:click={`@post('${base()}boards/${boardId}/batch-move/${col.id}'); $showColumnPicker = false`}
+            >{col.title}</button>
+          ))}
+        </div>
+        <button
+          class="selection-bar-btn selection-bar-btn--danger"
+          data-on:click__viewtransition={`@post('${base()}boards/${boardId}/batch-delete')`}
+          disabled={selectedCount === 0}
+        >Delete</button>
+        <button
+          class="selection-bar-btn"
+          data-on:click={`@post('${base()}boards/${boardId}/select-mode/cancel')`}
+        >Cancel</button>
+      </div>
     </div>
   )
 }
@@ -901,6 +1034,9 @@ body {
   align-items: flex-start;
   /* Momentum scrolling on iOS */
   -webkit-overflow-scrolling: touch;
+  /* Snap columns into view on swipe */
+  scroll-snap-type: x mandatory;
+  scroll-padding: 0 clamp(8px, 2vw, 24px);
 }
 
 .column {
@@ -913,6 +1049,7 @@ body {
   max-width: 300px;
   flex-shrink: 0;
   user-select: none;
+  scroll-snap-align: center;
 }
 
 .column[data-kanban-dragging],
@@ -1062,6 +1199,16 @@ body {
 /* Suppress text selection on everything during drag */
 #board[data-kanban-active] { user-select: none; -webkit-user-select: none; }
 
+/* Disable scroll snap during drag — lets auto-scroll work smoothly */
+#board[data-kanban-active] .columns { scroll-snap-type: none; }
+
+/* Pointer drag needs touch-action: none to prevent browser scroll stealing
+   the pointer. Only set for fine pointer (mouse/trackpad) — touch devices
+   use native scroll + tap-for-action-sheet instead of drag. */
+@media (pointer: fine) {
+  .card, .column { touch-action: none; }
+}
+
 .delete-btn {
   background: none;
   border: none;
@@ -1150,6 +1297,203 @@ body {
 }
 
 .add-col-form button:hover { background: #475569; }
+
+/* ── Select mode button ───────────────────────────── */
+
+.select-mode-btn {
+  background: #334155;
+  border: 1px solid #475569;
+  border-radius: 6px;
+  color: #94a3b8;
+  padding: 6px 14px;
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+  white-space: nowrap;
+  min-height: 44px;
+}
+.select-mode-btn:hover { background: #475569; color: #e2e8f0; }
+
+/* ── Card selection checkbox ─────────────────────── */
+
+.card-select-checkbox {
+  background: none;
+  border: none;
+  font-size: 1.2rem;
+  color: #64748b;
+  cursor: pointer;
+  padding: 4px;
+  min-width: 44px;
+  min-height: 44px;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  line-height: 1;
+}
+.card--selected { border-color: #6366f1; background: #1e1b4b; }
+.card--selected .card-select-checkbox { color: #818cf8; }
+
+/* ── Action sheet ────────────────────────────────── */
+
+.action-sheet-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 200;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(4px);
+}
+
+.action-sheet {
+  background: #1e293b;
+  border-radius: 16px 16px 0 0;
+  padding: 16px;
+  width: 100%;
+  max-width: 400px;
+  max-height: 80vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  /* Slide up animation */
+  animation: sheet-slide-up 200ms cubic-bezier(0.2, 0, 0, 1);
+}
+@keyframes sheet-slide-up {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+
+.action-sheet-header {
+  padding: 4px 0 8px;
+  border-bottom: 1px solid #334155;
+  margin-bottom: 4px;
+}
+.action-sheet-title {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #e2e8f0;
+  word-break: break-word;
+}
+
+.action-sheet-section {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.action-sheet-label {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #64748b;
+  padding: 4px 0;
+}
+
+.action-sheet-btn {
+  background: #0f172a;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  color: #e2e8f0;
+  padding: 12px 16px;
+  font-size: 0.9rem;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.15s;
+  min-height: 44px;
+}
+.action-sheet-btn:hover { background: #1e293b; border-color: #475569; }
+.action-sheet-btn--danger { color: #f87171; }
+.action-sheet-btn--danger:hover { background: #1c1917; border-color: #991b1b; }
+.action-sheet-btn--cancel {
+  background: #334155;
+  border-color: #475569;
+  text-align: center;
+  font-weight: 600;
+  margin-top: 4px;
+}
+.action-sheet-btn--cancel:hover { background: #475569; }
+
+/* ── Selection bar (bottom action bar) ───────────── */
+
+.selection-bar {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: #1e293b;
+  border-top: 1px solid #334155;
+  padding: 12px clamp(12px, 4vw, 24px);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  z-index: 150;
+  /* Slide up */
+  animation: sheet-slide-up 200ms cubic-bezier(0.2, 0, 0, 1);
+}
+.selection-bar-count {
+  font-size: 0.85rem;
+  color: #94a3b8;
+  white-space: nowrap;
+}
+.selection-bar-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-left: auto;
+  position: relative;
+}
+.selection-bar-btn {
+  background: #334155;
+  border: 1px solid #475569;
+  border-radius: 6px;
+  color: #e2e8f0;
+  padding: 8px 14px;
+  font-size: 0.85rem;
+  cursor: pointer;
+  min-height: 44px;
+  transition: background 0.15s;
+  white-space: nowrap;
+}
+.selection-bar-btn:hover { background: #475569; }
+.selection-bar-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.selection-bar-btn--danger { color: #f87171; border-color: #991b1b; }
+.selection-bar-btn--danger:hover { background: #1c1917; }
+
+/* Column picker dropdown above the "Move to…" button */
+.column-picker {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  margin-bottom: 6px;
+  background: #1e293b;
+  border: 1px solid #475569;
+  border-radius: 8px;
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 160px;
+  box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.3);
+  z-index: 160;
+}
+.column-picker-btn {
+  background: none;
+  border: none;
+  color: #e2e8f0;
+  padding: 10px 12px;
+  font-size: 0.85rem;
+  cursor: pointer;
+  border-radius: 6px;
+  text-align: left;
+  transition: background 0.15s;
+  min-height: 44px;
+}
+.column-picker-btn:hover { background: #334155; }
+
+/* Extra bottom padding on board when selection bar is visible */
+#board:has(.selection-bar) .columns { padding-bottom: 80px; }
 
 /* MPA cross-document view transitions */
 @view-transition { navigation: auto; }
@@ -1248,6 +1592,13 @@ function Shell({ path, children }) {
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ dropColumnId: d.columnId, dropPosition: d.position })
             });
+          });
+
+          // Touch card tap → open action sheet (server-tracked)
+          document.getElementById('app').addEventListener('kanban-card-tap', function(e) {
+            var d = e.detail;
+            if (!d.cardId) return;
+            fetch('${base()}cards/' + d.cardId + '/sheet', { method: 'POST' });
           });
 
           document.getElementById('app').addEventListener('kanban-column-drag-end', function(e) {
@@ -1541,13 +1892,23 @@ app.get('/boards/:boardId', async (c) => {
       const pushBoard = async (selector, mode, opts) => {
         const data = await getBoard(boardId)
         if (!data) return
-        await stream.writeSSE(dsePatch(selector, <Board board={data.board} columns={data.columns} cards={data.cards} />, mode, opts))
+        const ui = getUIState(boardId)
+        await stream.writeSSE(dsePatch(selector, <Board board={data.board} columns={data.columns} cards={data.cards} uiState={ui} />, mode, opts))
       }
 
       const topic = `board:${boardId}:changed`
       const handler = () => pushBoard('#board', 'outer', { useViewTransition: true })
       bus.addEventListener(topic, handler)
-      stream.onAbort(() => bus.removeEventListener(topic, handler))
+
+      // Also re-push on UI-only changes (action sheet, selection mode)
+      const uiTopic = `board:${boardId}:ui`
+      const uiHandler = () => pushBoard('#board', 'outer')
+      bus.addEventListener(uiTopic, uiHandler)
+
+      stream.onAbort(() => {
+        bus.removeEventListener(topic, handler)
+        bus.removeEventListener(uiTopic, uiHandler)
+      })
 
       await pushBoard('#app', 'inner')
       while (!stream.closed) { await stream.sleep(30000) }
@@ -1555,9 +1916,10 @@ app.get('/boards/:boardId', async (c) => {
   }
 
   const data = await getBoard(boardId)
+  const ui = getUIState(boardId)
   return c.html('<!DOCTYPE html>' + (
     <Shell path={`/boards/${boardId}`}>
-      {data ? <Board board={data.board} columns={data.columns} cards={data.cards} /> : <p>Board not found</p>}
+      {data ? <Board board={data.board} columns={data.columns} cards={data.cards} uiState={ui} /> : <p>Board not found</p>}
     </Shell>
   ).toString())
 })
@@ -1642,9 +2004,17 @@ app.put('/cards/:cardId', async (c) => {
     events.push(createEvent('card.descriptionUpdated', { id: cardId, description: newDesc }, { correlationId }))
   }
 
+  const boardId = await boardIdFromCard(cardId)
   if (events.length > 0) {
-    const boardId = await boardIdFromCard(cardId)
     await appendEventsWithUndo(events, boardId)
+  }
+  // Clear editing state after save
+  if (boardId) {
+    const ui = getUIState(boardId)
+    ui.editingCard = null
+    // Data change already triggers SSE push if events were appended;
+    // if no data changed but we still need to dismiss the form, emit UI
+    if (events.length === 0) emitUI(boardId)
   }
   return c.body(null, 204)
 })
@@ -1713,6 +2083,13 @@ app.put('/columns/:columnId/move', async (c) => {
 app.delete('/cards/:cardId', async (c) => {
   const cardId = c.req.param('cardId')
   const boardId = await boardIdFromCard(cardId)
+  // Clean up UI state referencing this card
+  if (boardId) {
+    const ui = getUIState(boardId)
+    if (ui.activeCardSheet === cardId) ui.activeCardSheet = null
+    if (ui.editingCard === cardId) ui.editingCard = null
+    ui.selectedCards.delete(cardId)
+  }
   const evt = createEvent('card.deleted', { id: cardId })
   await appendEventsWithUndo([evt], boardId)
   return c.body(null, 204)
@@ -1745,6 +2122,185 @@ app.post('/boards/:boardId/redo', async (c) => {
     boardId,
     { isUndoRedo: true }
   )
+  return c.body(null, 204)
+})
+
+// --- UI state commands (server-tracked, morph-pushed) ---
+
+// Helper: emit UI change event to trigger SSE re-push
+function emitUI(boardId) {
+  bus.dispatchEvent(new CustomEvent(`board:${boardId}:ui`, { detail: null }))
+}
+
+// Action sheet: open for a card
+app.post('/cards/:cardId/sheet', async (c) => {
+  const cardId = c.req.param('cardId')
+  const boardId = await boardIdFromCard(cardId)
+  if (!boardId) return c.body(null, 404)
+  const ui = getUIState(boardId)
+  // Toggle: if already open for this card, close it
+  ui.activeCardSheet = ui.activeCardSheet === cardId ? null : cardId
+  ui.editingCard = null
+  emitUI(boardId)
+  return c.body(null, 204)
+})
+
+// Action sheet: dismiss
+app.post('/cards/sheet/dismiss', async (c) => {
+  // Need to find which board has an active sheet — check all
+  for (const [boardId, ui] of boardUIState) {
+    if (ui.activeCardSheet) {
+      ui.activeCardSheet = null
+      emitUI(boardId)
+      return c.body(null, 204)
+    }
+  }
+  return c.body(null, 204)
+})
+
+// Action sheet: move card to column (from sheet)
+app.post('/cards/:cardId/sheet-move/:columnId', async (c) => {
+  const cardId = c.req.param('cardId')
+  const columnId = c.req.param('columnId')
+
+  const db = await dbPromise
+  const card = await db.get('cards', cardId)
+  if (!card) return c.body(null, 404)
+
+  // Place at end of target column
+  const siblings = (await db.getAllFromIndex('cards', 'byColumn', columnId))
+    .sort(cmpPosition)
+  const lastPos = siblings.length > 0 ? siblings[siblings.length - 1].position : null
+
+  const boardId = await boardIdFromCard(cardId)
+  const evt = createEvent('card.moved', {
+    id: cardId,
+    columnId,
+    position: generateKeyBetween(lastPos, null),
+  })
+  await appendEventsWithUndo([evt], boardId)
+
+  // Dismiss sheet
+  if (boardId) {
+    const ui = getUIState(boardId)
+    ui.activeCardSheet = null
+    // Data change already triggers SSE push via bus, no need for emitUI
+  }
+  return c.body(null, 204)
+})
+
+// Edit card (server-tracked): toggle inline edit form
+app.post('/cards/:cardId/edit', async (c) => {
+  const cardId = c.req.param('cardId')
+  const boardId = await boardIdFromCard(cardId)
+  if (!boardId) return c.body(null, 404)
+  const ui = getUIState(boardId)
+  ui.editingCard = ui.editingCard === cardId ? null : cardId
+  ui.activeCardSheet = null
+  emitUI(boardId)
+  return c.body(null, 204)
+})
+
+// Edit card: cancel
+app.post('/cards/:cardId/edit-cancel', async (c) => {
+  const cardId = c.req.param('cardId')
+  const boardId = await boardIdFromCard(cardId)
+  if (!boardId) return c.body(null, 404)
+  const ui = getUIState(boardId)
+  ui.editingCard = null
+  emitUI(boardId)
+  return c.body(null, 204)
+})
+
+// Selection mode: enter
+app.post('/boards/:boardId/select-mode', async (c) => {
+  const boardId = c.req.param('boardId')
+  const ui = getUIState(boardId)
+  ui.selectionMode = true
+  ui.selectedCards.clear()
+  ui.activeCardSheet = null
+  ui.editingCard = null
+  emitUI(boardId)
+  return c.body(null, 204)
+})
+
+// Selection mode: cancel
+app.post('/boards/:boardId/select-mode/cancel', async (c) => {
+  const boardId = c.req.param('boardId')
+  const ui = getUIState(boardId)
+  ui.selectionMode = false
+  ui.selectedCards.clear()
+  emitUI(boardId)
+  return c.body(null, 204)
+})
+
+// Selection mode: toggle card selection
+app.post('/cards/:cardId/toggle-select', async (c) => {
+  const cardId = c.req.param('cardId')
+  const boardId = await boardIdFromCard(cardId)
+  if (!boardId) return c.body(null, 404)
+  const ui = getUIState(boardId)
+  if (ui.selectedCards.has(cardId)) {
+    ui.selectedCards.delete(cardId)
+  } else {
+    ui.selectedCards.add(cardId)
+  }
+  emitUI(boardId)
+  return c.body(null, 204)
+})
+
+// Batch move: move all selected cards to target column
+app.post('/boards/:boardId/batch-move/:columnId', async (c) => {
+  const boardId = c.req.param('boardId')
+  const columnId = c.req.param('columnId')
+  const ui = getUIState(boardId)
+
+  if (ui.selectedCards.size === 0) return c.body(null, 204)
+
+  const db = await dbPromise
+  // Get existing cards in target column to place after them
+  const existing = (await db.getAllFromIndex('cards', 'byColumn', columnId))
+    .sort(cmpPosition)
+  const lastPos = existing.length > 0 ? existing[existing.length - 1].position : null
+
+  // Generate positions for all selected cards
+  const cardIds = [...ui.selectedCards]
+  const positions = generateNKeysBetween(lastPos, null, cardIds.length)
+  const correlationId = crypto.randomUUID()
+
+  const events = cardIds.map((cardId, i) =>
+    createEvent('card.moved', {
+      id: cardId,
+      columnId,
+      position: positions[i],
+    }, { correlationId })
+  )
+
+  await appendEventsWithUndo(events, boardId)
+  // Exit selection mode
+  ui.selectionMode = false
+  ui.selectedCards.clear()
+  // Data change triggers SSE push
+  return c.body(null, 204)
+})
+
+// Batch delete: delete all selected cards
+app.post('/boards/:boardId/batch-delete', async (c) => {
+  const boardId = c.req.param('boardId')
+  const ui = getUIState(boardId)
+
+  if (ui.selectedCards.size === 0) return c.body(null, 204)
+
+  const correlationId = crypto.randomUUID()
+  const events = [...ui.selectedCards].map(cardId =>
+    createEvent('card.deleted', { id: cardId }, { correlationId })
+  )
+
+  await appendEventsWithUndo(events, boardId)
+  // Exit selection mode
+  ui.selectionMode = false
+  ui.selectedCards.clear()
+  // Data change triggers SSE push
   return c.body(null, 204)
 })
 

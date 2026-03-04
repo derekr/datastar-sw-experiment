@@ -386,6 +386,15 @@
 
     function onPointerMove(e) {
       if (pending && !drag) {
+        // touch-card is tap-only, not drag — if finger moves too far, cancel
+        if (pending.type === 'touch-card') {
+          var tdx = e.clientX - pending.startX
+          var tdy = e.clientY - pending.startY
+          if (Math.sqrt(tdx * tdx + tdy * tdy) >= 10) {
+            pending = null  // scrolling — cancel tap detection
+          }
+          return
+        }
         var dx = e.clientX - pending.startX
         var dy = e.clientY - pending.startY
         if (Math.sqrt(dx * dx + dy * dy) >= DRAG_THRESHOLD) {
@@ -530,6 +539,22 @@
     }
 
     function onPointerUp(e) {
+      // Touch card tap: if the finger didn't move much, emit event for action sheet
+      if (pending && pending.type === 'touch-card') {
+        var dx = e.clientX - pending.startX
+        var dy = e.clientY - pending.startY
+        var elapsed = performance.now() - pending.startTime
+        // Treat as tap if < 10px movement and < 500ms
+        if (Math.sqrt(dx * dx + dy * dy) < 10 && elapsed < 500) {
+          var cardId = getCardId(pending.el)
+          if (cardId) {
+            emit('card-tap', { cardId: cardId })
+          }
+        }
+        pending = null
+        return
+      }
+
       if (pending && !drag) {
         // Didn't cross threshold — just a click
         pending.el.releasePointerCapture(pending.pointerId)
@@ -591,7 +616,10 @@
         emit(type + '-drag-cancel', type === 'card' ? { cardId: id } : { columnId: id })
       }
       if (pending) {
-        pending.el.releasePointerCapture(pending.pointerId)
+        // touch-card pending doesn't capture, so only release for real drag pending
+        if (pending.type !== 'touch-card') {
+          pending.el.releasePointerCapture(pending.pointerId)
+        }
         pending = null
       }
     }
@@ -605,7 +633,7 @@
       var el = null
 
       // Card drag: grab the card itself (but not buttons inside it)
-      if (target.closest('button') || target.closest('input') || target.closest('a')) return
+      if (target.closest('button') || target.closest('input') || target.closest('a') || target.closest('textarea') || target.closest('form')) return
       var card = target.closest('.card')
       if (card) {
         el = card
@@ -622,6 +650,24 @@
       }
 
       if (!el || !type) return
+
+      // Touch devices: skip drag entirely. Tap on card → open action sheet.
+      // Let native scroll handle swipe. Column drag also disabled on touch.
+      if (e.pointerType === 'touch') {
+        if (type === 'card') {
+          // Record touch start for tap detection (onPointerUp handles it)
+          pending = {
+            el: el,
+            type: 'touch-card',
+            pointerId: e.pointerId,
+            startX: e.clientX,
+            startY: e.clientY,
+            startTime: performance.now()
+          }
+          // Don't capture or preventDefault — allow native scroll
+        }
+        return
+      }
 
       e.preventDefault()
       pending = {
