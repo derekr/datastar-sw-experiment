@@ -16,6 +16,29 @@ function base() {
 
 // --- Compression helpers (board sharing) ---
 
+// Max decompressed size: 2 MB (prevents zip bombs)
+const MAX_DECOMPRESS_BYTES = 2 * 1024 * 1024
+// Max events per import
+const MAX_IMPORT_EVENTS = 5000
+
+function mergeChunks(chunks) {
+  const total = chunks.reduce((n, c) => n + c.length, 0)
+  const merged = new Uint8Array(total)
+  let offset = 0
+  for (const c of chunks) { merged.set(c, offset); offset += c.length }
+  return merged
+}
+
+// Uint8Array → base64url (chunked to avoid call stack overflow)
+function uint8ToBase64url(buf) {
+  let binary = ''
+  const CHUNK = 0x8000
+  for (let i = 0; i < buf.length; i += CHUNK) {
+    binary += String.fromCharCode.apply(null, buf.subarray(i, i + CHUNK))
+  }
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+}
+
 async function compressToBase64url(jsonStr) {
   const buf = new TextEncoder().encode(jsonStr)
   const cs = new CompressionStream('deflate')
@@ -29,13 +52,7 @@ async function compressToBase64url(jsonStr) {
     if (done) break
     chunks.push(value)
   }
-  const total = chunks.reduce((n, c) => n + c.length, 0)
-  const merged = new Uint8Array(total)
-  let offset = 0
-  for (const c of chunks) { merged.set(c, offset); offset += c.length }
-  // base64url: standard base64 with +/ → -_ and no padding
-  const b64 = btoa(String.fromCharCode(...merged))
-  return b64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+  return uint8ToBase64url(mergeChunks(chunks))
 }
 
 async function decompressFromBase64url(b64url) {
@@ -47,17 +64,18 @@ async function decompressFromBase64url(b64url) {
   writer.write(buf)
   writer.close()
   const chunks = []
+  let totalBytes = 0
   const reader = ds.readable.getReader()
   while (true) {
     const { done, value } = await reader.read()
     if (done) break
+    totalBytes += value.length
+    if (totalBytes > MAX_DECOMPRESS_BYTES) {
+      throw new Error('Decompressed data exceeds size limit')
+    }
     chunks.push(value)
   }
-  const total = chunks.reduce((n, c) => n + c.length, 0)
-  const merged = new Uint8Array(total)
-  let offset = 0
-  for (const c of chunks) { merged.set(c, offset); offset += c.length }
-  return new TextDecoder().decode(merged)
+  return new TextDecoder().decode(mergeChunks(chunks))
 }
 
 // --- Event Sourcing ---
@@ -77,6 +95,9 @@ const EVENT_VERSIONS = {
   'card.descriptionUpdated': 1,
   'card.labelUpdated': 1,
 }
+
+// Allowed event types for import validation
+const ALLOWED_EVENT_TYPES = new Set(Object.keys(EVENT_VERSIONS))
 
 const LABEL_COLORS = {
   red: '#ef4444',
@@ -3584,9 +3605,62 @@ app.post('/boards/:boardId/share', async (c) => {
 // Import: receive compressed events from hash fragment, replay into local store
 app.post('/import', async (c) => {
   await initialize()
-  const { data } = await c.req.json()
-  const json = await decompressFromBase64url(data)
-  const events = JSON.parse(json)
+  const body = await c.req.json()
+  if (!body || typeof body.data !== 'string') {
+    return c.json({ error: 'Missing or invalid data field' }, 400)
+  }
+  // Decompress (size-limited by decompressFromBase64url)
+  let json
+  try {
+    json = await decompressFromBase64url(body.data)
+  } catch (e) {
+    return c.json({ error: 'Decompression failed: ' + e.message }, 400)
+  }
+  let events
+  try {
+    events = JSON.parse(json)
+  } catch (e) {
+    return c.json({ error: 'Invalid JSON' }, 400)
+  }
+  if (!Array.isArray(events)) {
+    return c.json({ error: 'Expected array of events' }, 400)
+  }
+  if (events.length > MAX_IMPORT_EVENTS) {
+    return c.json({ error: `Too many events (max ${MAX_IMPORT_EVENTS})` }, 400)
+  }
+  if (events.length === 0) {
+    return c.json({ error: 'No events to import' }, 400)
+  }
+  // Validate each event: must have known type, string data.id, and data object
+  for (let i = 0; i < events.length; i++) {
+    const evt = events[i]
+    if (!evt || typeof evt !== 'object') {
+      return c.json({ error: `Event ${i} is not an object` }, 400)
+    }
+    if (!ALLOWED_EVENT_TYPES.has(evt.type)) {
+      return c.json({ error: `Event ${i} has unknown type: ${evt.type}` }, 400)
+    }
+    if (!evt.data || typeof evt.data !== 'object') {
+      return c.json({ error: `Event ${i} missing data object` }, 400)
+    }
+    // Sanitize string fields to prevent XSS — cap lengths
+    if (evt.data.title != null) {
+      if (typeof evt.data.title !== 'string') return c.json({ error: `Event ${i} title not a string` }, 400)
+      evt.data.title = evt.data.title.slice(0, 500)
+    }
+    if (evt.data.description != null) {
+      if (typeof evt.data.description !== 'string') return c.json({ error: `Event ${i} description not a string` }, 400)
+      evt.data.description = evt.data.description.slice(0, 10000)
+    }
+    if (evt.data.label != null && typeof evt.data.label !== 'string') {
+      return c.json({ error: `Event ${i} label not a string` }, 400)
+    }
+  }
+  // Must contain exactly one board.created
+  const boardCreatedCount = events.filter(e => e.type === 'board.created').length
+  if (boardCreatedCount !== 1) {
+    return c.json({ error: `Expected exactly 1 board.created event, got ${boardCreatedCount}` }, 400)
+  }
   // Re-assign new IDs to the board so imports don't collide with existing data.
   // Map old entity IDs → new IDs for board, columns, and cards.
   const idMap = new Map()
@@ -4606,13 +4680,7 @@ app.get('/export', async (c) => {
   })
 })
 
-app.post('/import', async (c) => {
-  const events = await c.req.json()
-  if (!Array.isArray(events)) return c.text('Expected JSON array', 400)
-  // Replay events through appendEvents — deduplicates by event id
-  await appendEvents(events)
-  return c.body(null, 204)
-})
+
 
 // Debug: inspect event log (real-time)
 app.get('/events', async (c) => {
