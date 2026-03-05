@@ -1372,7 +1372,7 @@ function CardDetail({ card, column, columns, board, events, commandMenu }) {
   const lastModified = events.length > 0 ? events[events.length - 1] : null
 
   return (
-    <div id="card-detail" style={label ? `--card-label-color: ${LABEL_COLORS[label] || '#64748b'}` : ''}>
+    <div id="card-detail" style={`view-transition-name: card-expand${label ? `; --card-label-color: ${LABEL_COLORS[label] || '#64748b'}` : ''}`}>
       <div class="card-detail-header">
         <a id="card-detail-back" href={`${base()}boards/${board.id}`} class="back-link">← {board.title}</a>
       </div>
@@ -2609,6 +2609,19 @@ input:not(#_), textarea:not(#_), select:not(#_) { font-size: max(1rem, 16px); }
   animation-timing-function: cubic-bezier(0.2, 0, 0, 1);
 }
 ::view-transition-old(*) { animation: none; opacity: 0; }
+
+/* Card expand/collapse — the group handles position+size morph,
+   old/new both stay fully opaque so content crossfades naturally */
+::view-transition-group(card-expand) {
+  animation-duration: 250ms;
+  animation-timing-function: cubic-bezier(0.2, 0, 0, 1);
+  overflow: hidden;
+}
+::view-transition-old(card-expand),
+::view-transition-new(card-expand) {
+  animation: none;
+  mix-blend-mode: normal;
+}
 /* ── Card detail page ────────────────────────────── */
 
 #card-detail {
@@ -3059,6 +3072,31 @@ function Shell({ path, children }) {
               haptic.tap();
             }
           }, true);
+
+          // View transition: card expand / collapse
+          // When navigating TO a card detail page, tag the card element so the
+          // browser animates it into the detail view.
+          window.addEventListener('pageswap', function(e) {
+            if (!e.viewTransition) return;
+            var url = new URL(e.activation.entry.url);
+            var m = url.pathname.match(/boards\\/[^/]+\\/cards\\/([^/]+)/);
+            if (m) {
+              var el = document.getElementById('card-' + m[1]);
+              if (el) el.style.viewTransitionName = 'card-expand';
+            }
+          });
+          // When navigating FROM a card detail page back to a board, tag the
+          // card element on the new page so the detail collapses back into it.
+          window.addEventListener('pagereveal', function(e) {
+            if (!e.viewTransition) return;
+            var from = navigation.activation && navigation.activation.from;
+            if (!from) return;
+            var m = new URL(from.url).pathname.match(/boards\\/[^/]+\\/cards\\/([^/]+)/);
+            if (m) {
+              var el = document.getElementById('card-' + m[1]);
+              if (el) el.style.viewTransitionName = 'card-expand';
+            }
+          });
         `)}</script>
       </body>
     </html>
