@@ -1090,8 +1090,10 @@ function Card({ card, uiState, boardId }) {
           class="card-edit-form"
           data-on:submit__prevent={`@put('${base()}cards/${card.id}', {contentType: 'form'})`}
         >
-          <input name="title" type="text" value={card.title} placeholder="Title" autocomplete="off" />
-          <textarea name="description" placeholder="Description (optional)" rows="2">{desc}</textarea>
+          <div class="card-edit-inputs">
+            <input name="title" type="text" value={card.title} placeholder="Title" autocomplete="off" />
+            <textarea name="description" placeholder="Description (optional)" rows="2">{desc}</textarea>
+          </div>
           <LabelPicker cardId={card.id} currentLabel={label} />
           <div class="card-edit-actions">
             <button type="submit">Save</button>
@@ -1474,18 +1476,30 @@ function Board({ board, columns, cards, uiState, tabCount, connStatus, commandMe
   return (
     <div id="board" class={isTimeTraveling ? 'board--time-travel' : ''}>
       <div id="board-header" class="board-header">
-        <a id="board-back" href={base()} class="back-link"><Icon name="lucide:arrow-left" /> Boards</a>
         {isEditingTitle
-          ? <form
-              id="board-title-form"
-              class="board-title-form"
-              data-on:submit__prevent={`@put('${base()}boards/${board.id}', {contentType: 'form'})`}
-            >
-              <input id="board-title-input" name="title" type="text" value={board.title} autocomplete="off" />
-              <button type="submit" class="board-title-save">Save</button>
-              <button type="button" class="board-title-cancel" data-on:click={`@post('${base()}boards/${board.id}/title-edit-cancel')`}>Cancel</button>
-            </form>
-          : <h1 id="board-title" class={isTimeTraveling ? '' : 'board-title-editable'} {...(!isTimeTraveling ? { 'data-on:click': `@post('${base()}boards/${board.id}/title-edit')` } : {})}>{board.title}</h1>
+          ? <>
+              <a id="board-back" href={base()} class="back-link board-back-title"><Icon name="lucide:arrow-left" /> {board.title}</a>
+              <form
+                id="board-title-form"
+                class="board-title-form"
+                data-on:submit__prevent={`@put('${base()}boards/${board.id}', {contentType: 'form'})`}
+              >
+                <input id="board-title-input" name="title" type="text" value={board.title} autocomplete="off" />
+                <button type="submit" class="board-title-save">Save</button>
+                <button type="button" class="board-title-cancel" data-on:click={`@post('${base()}boards/${board.id}/title-edit-cancel')`}>Cancel</button>
+              </form>
+            </>
+          : <>
+              <a id="board-back" href={base()} class="back-link board-back-title"><Icon name="lucide:arrow-left" /> {board.title}</a>
+              {!isTimeTraveling && (
+                <button
+                  id="board-title-edit-btn"
+                  class="board-title-edit-btn"
+                  data-on:click={`@post('${base()}boards/${board.id}/title-edit')`}
+                  title="Edit board title"
+                ><Icon name="lucide:pencil" /></button>
+              )}
+            </>
         }
         <span id="tab-count" class={`tab-count${tabCount > 1 ? '' : ' tab-count--hidden'}`} title={`${tabCount} tabs viewing this board`}>{tabCount > 1 ? `${tabCount} tabs` : ''}</span>
         {connStatus && <StatusChip isOnline={connStatus.isOnline} unsyncedCount={connStatus.unsyncedCount} hasSyncConfig={connStatus.hasSyncConfig} />}
@@ -2063,12 +2077,19 @@ input:not(#_), textarea:not(#_), select:not(#_) { font-size: max(1rem, 16px); }
   margin-bottom: clamp(12px, 3vw, 24px);
   flex-wrap: wrap;
 }
-.board-header h1 {
-  font-size: var(--font-size-2);
+.board-back-title {
+  font-size: var(--font-size-1);
   font-weight: var(--font-weight-semi-bold);
+  color: var(--neutral-11);
 }
-.board-title-editable { cursor: pointer; }
-.board-title-editable:hover { color: var(--primary-7); }
+.board-back-title:hover { color: var(--primary-7); text-decoration: none; }
+.board-title-edit-btn {
+  background: none; border: none; color: var(--neutral-6); cursor: pointer;
+  font-size: var(--font-size--2); padding: 4px; line-height: 1;
+  display: inline-flex; align-items: center;
+  transition: color var(--anim-duration-fast);
+}
+.board-title-edit-btn:hover { color: var(--primary-7); }
 .board-title-form {
   display: flex;
   align-items: center;
@@ -2243,17 +2264,22 @@ input:not(#_), textarea:not(#_), select:not(#_) { font-size: max(1rem, 16px); }
 .card-content { flex: 1; min-width: 0; }
 .card-title { font-size: var(--font-size--1); word-break: break-word; }
 .card-desc { font-size: var(--font-size--2); color: var(--neutral-8); margin: 4px 0 0; word-break: break-word; }
-.card-actions { display: flex; gap: 2px; flex-shrink: 0; margin-left: 4px; }
+.card-actions { display: flex; align-items: center; gap: 0; flex-shrink: 0; margin-left: 4px; }
 
 .card-edit-btn {
   background: none; border: none; color: var(--neutral-6); cursor: pointer;
-  font-size: var(--font-size--1); padding: 6px; min-width: 44px; min-height: 44px;
-  display: grid; place-items: center; line-height: 1; transition: color var(--anim-duration-fast);
+  font-size: var(--font-size--1); padding: 6px;
+  display: inline-flex; align-items: center; justify-content: center;
+  line-height: 1; transition: color var(--anim-duration-fast);
+  border-radius: 4px;
 }
-.card-edit-btn:hover { color: var(--primary-7); }
+.card-edit-btn:hover { color: var(--primary-7); background: var(--neutral-5); }
 
 .card-edit-form {
-  width: 100%; margin-top: 8px; display: flex; flex-direction: column; gap: 6px;
+  width: 100%; margin-top: 8px; display: flex; flex-direction: column; gap: var(--size-0);
+}
+.card-edit-inputs {
+  display: flex; flex-direction: column; gap: 6px;
 }
 .card-edit-form input,
 .card-edit-form textarea {
@@ -2356,18 +2382,18 @@ input:not(#_), textarea:not(#_), select:not(#_) { font-size: max(1rem, 16px); }
   border: none;
   color: var(--neutral-6);
   cursor: pointer;
-  font-size: var(--font-size-1);
+  font-size: var(--font-size--1);
   padding: 6px;
-  min-width: 44px;
-  min-height: 44px;
-  display: grid;
-  place-items: center;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   flex-shrink: 0;
   line-height: 1;
   transition: color var(--anim-duration-fast);
+  border-radius: 4px;
 }
 
-.delete-btn:hover { color: var(--error-7); }
+.delete-btn:hover { color: var(--error-7); background: var(--neutral-5); }
 
 .add-form {
   display: flex;
@@ -2496,12 +2522,11 @@ input:not(#_), textarea:not(#_), select:not(#_) { font-size: max(1rem, 16px); }
   border: 1px solid var(--neutral-6);
   border-radius: var(--border-radius-0);
   color: var(--neutral-8);
-  padding: 6px 14px;
+  padding: 4px 10px;
   font-size: var(--font-size--2);
   cursor: pointer;
   transition: background var(--anim-duration-fast), color var(--anim-duration-fast);
   white-space: nowrap;
-  min-height: 44px;
 }
 .select-mode-btn:hover { background: var(--neutral-6); color: var(--neutral-11); }
 
@@ -3177,16 +3202,16 @@ input:not(#_), textarea:not(#_), select:not(#_) { font-size: max(1rem, 16px); }
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 24px;
-  height: 24px;
   border: none;
   background: none;
-  color: var(--neutral-7);
+  color: var(--neutral-6);
   cursor: pointer;
   border-radius: 4px;
   font-size: var(--font-size--1);
   text-decoration: none;
   line-height: 1;
+  padding: 6px;
+  transition: color var(--anim-duration-fast), background var(--anim-duration-fast);
 }
 .card-expand-btn:hover {
   background: var(--neutral-5);
