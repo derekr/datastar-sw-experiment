@@ -122,10 +122,12 @@ const DOCS_TOPICS = [
   { slug: 'event-sourcing', title: 'Event Sourcing & CQRS',          section: 'core' },
   { slug: 'sse-morphing',   title: 'SSE & Server-Sent Morphing',     section: 'core' },
   { slug: 'signals',        title: 'Signals & Server-Owned UI State', section: 'core' },
+  { slug: 'hypermedia',     title: 'Hypermedia — The Missing Pattern', section: 'core' },
+  { slug: 'mpa-navigations', title: 'MPA Navigations',                section: 'bonus' },
   { slug: 'service-worker', title: 'Service Worker as Server',       section: 'bonus' },
   { slug: 'indexeddb',      title: 'IndexedDB: Keeping It Light',    section: 'bonus' },
   { slug: 'fractional-indexing', title: 'Fractional Indexing',        section: 'bonus' },
-  { slug: 'local-first',    title: 'Local-First in the Browser',     section: 'bonus' },
+  { slug: 'local-first',   title: 'Local-First in the Browser',     section: 'bonus' },
 ]
 
 const LABEL_COLORS = {
@@ -4742,6 +4744,114 @@ app.post('/cards/:cardId/sheet', async (c) => {
   )
 }
 
+function DocsHypermediaContent({ topic, commandMenu }) {
+  return (
+    <DocsInner topic={topic} commandMenu={commandMenu}>
+      <h1>{topic.title}</h1>
+
+      <section class="docs-section">
+        <p>The web was built on hypermedia. That's the "H" in HTML — <strong>HyperText</strong> Markup Language. Links connect pages, forms submit data, and the server drives the flow by sending the client what to do next. This was the original pattern before we "discovered" SPAs.</p>
+        <p>Datastar brings hypermedia back. Not as a throwback, but as a genuinely simpler way to build interactive apps.</p>
+      </section>
+
+      <section class="docs-section">
+        <h2>What is hypermedia?</h2>
+        <p>Hypermedia means the response includes everything the client needs to continue:</p>
+        <ul class="docs-list">
+          <li><strong>Links</strong> — <code>&lt;a href="..."&gt;</code> tells the client where to go next.</li>
+          <li><strong>Forms</strong> — <code>&lt;form action="..."&gt;</code> tells the client where to send data.</li>
+          <li><strong>Actions</strong> — buttons and inputs describe what the user can do.</li>
+        </ul>
+        <p>The client doesn't need to know ahead of time what operations are available. The server tells it — in every response.</p>
+      </section>
+
+      <section class="docs-section">
+        <h2>The "follow your nose" principle</h2>
+        <p>With a JSON API, the client needs out-of-band knowledge:</p>
+        <pre><code>{`// Client must know:
+// - the endpoint URL (/api/boards)
+// - the HTTP method (GET)
+// - the response shape
+fetch('/api/boards')  // what if this changes?
+  .then(r => r.json())
+  .then(boards => ...)`}</code></pre>
+        <p>With hypermedia, the server tells the client what to do:</p>
+        <pre><code>{`// Server sends:
+// <a href="/boards/new">Create Board</a>
+// <a href="/boards/123">View Board</a>
+// The client just follows links. No URL knowledge needed.`}</code></pre>
+        <p>This is called "driving the application state through hypermedia" — HATEOAS. The server is the pilot; the client is the display.</p>
+      </section>
+
+      <section class="docs-section">
+        <h2>How Datastar embraces hypermedia</h2>
+        <p>Every HTML response from the server includes all available actions:</p>
+        <pre><code>{`// The server renders this HTML:
+<form action="/boards" method="POST">
+  <input name="title" placeholder="Board title">
+  <button type="submit">Create</button>
+</form>
+
+// And this form:
+<button data-on:click="@post('/boards/123/select-mode')">
+  Select cards
+</button>
+
+// And this link:
+<a href="/boards/123">Open board</a>`}</code></pre>
+        <p>The client never needs to construct URLs or know which API endpoints exist. The server says "here's what you can do," and Datastar wires it up.</p>
+      </section>
+
+      <section class="docs-section">
+        <h2>Contrast: JSON API vs Hypermedia</h2>
+        <table class="docs-table">
+          <thead>
+            <tr><th>JSON API</th><th>Hypermedia (Datastar)</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Client knows all endpoints upfront</td><td>Server tells client what actions exist</td></tr>
+            <tr><td>Client decides what to render</td><td>Server decides what the UI looks like</td></tr>
+            <tr><td>Client maintains state</td><td>Server owns state, pushes UI</td></tr>
+            <tr><td>Change URL scheme = break clients</td><td>Change is transparent to clients</td></tr>
+            <tr><td>Need documentation</td><td>Self-documenting (it's just HTML)</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section class="docs-section">
+        <h2>Why it fell out of favor</h2>
+        <p>Hypermedia was the original web pattern, but it "fell out of favor" for a few reasons:</p>
+        <ul class="docs-list">
+          <li><strong>Page reloads felt slow</strong> — full HTML round-trip on every click.</li>
+          <li><strong>No real-time</strong> — no way to push updates to the client.</li>
+          <li><strong>Static feeling</strong> — pages felt like documents, not apps.</li>
+        </ul>
+        <p>Datastar fixes all three: SSE pushes updates without reloads, morphing feels instant, and the UI is fully interactive — all while keeping hypermedia's simplicity.</p>
+      </section>
+
+      <section class="docs-section">
+        <h2>The self-documenting nature</h2>
+        <p>One underappreciated benefit: hypermedia apps are self-documenting. View Source on any page shows every available action. There's no API docs to keep in sync, no GraphQL schema to generate, no SDK to update.</p>
+        <p>If the server adds a new button, it's immediately available — no client code changes needed. The server said "here's a new action," the client received it, Datastar wired it up.</p>
+      </section>
+
+      <section class="docs-section">
+        <h2>The pattern in this app</h2>
+        <p>Every button, form, and link in this app is hypermedia-driven:</p>
+        <ul class="docs-list">
+          <li>Creating a board: <code>&lt;form action="/boards" method="POST"&gt;</code></li>
+          <li>Opening a board: <code>&lt;a href="/boards/123"&gt;</code></li>
+          <li>Editing a card: <code>data-on:click="@post('/cards/123/edit')"</code></li>
+          <li>Deleting a column: <code>data-on:click="@delete('/columns/456')"</code></li>
+        </ul>
+        <p>The client code (<code>eg-kanban.js</code>) handles only drag-and-drop and touch interactions. Every meaningful action goes through the server, and the server tells the client what to display.</p>
+      </section>
+
+      <DocsPager topic={topic} />
+    </DocsInner>
+  )
+}
+
 function DocsServiceWorkerContent({ topic, commandMenu }) {
   return (
     <DocsInner topic={topic} commandMenu={commandMenu}>
@@ -4897,6 +5007,8 @@ function DocsTopicContent({ topic, commandMenu }) {
       return <DocsSseMorphingContent topic={topic} commandMenu={commandMenu} />
     case 'signals':
       return <DocsSignalsContent topic={topic} commandMenu={commandMenu} />
+    case 'hypermedia':
+      return <DocsHypermediaContent topic={topic} commandMenu={commandMenu} />
     case 'service-worker':
       return <DocsServiceWorkerContent topic={topic} commandMenu={commandMenu} />
     default:
