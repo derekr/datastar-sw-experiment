@@ -9,6 +9,11 @@ import { generateKeyBetween, generateNKeysBetween } from 'fractional-indexing'
 // Not imported here because Safari's SW fetch handler doesn't reliably
 // intercept <script src> subresource requests on SW-served pages.
 
+// Iconify web component for consistent icons (loaded from CDN like Datastar).
+function Icon({ name, ...props }) {
+  return <iconify-icon icon={name} inline {...props}></iconify-icon>
+}
+
 // Base path derived from SW scope — '/' locally, '/repo-name/' on GitHub Pages.
 // Lazy-init because self.registration isn't available at module parse time.
 let _base
@@ -1023,7 +1028,7 @@ function LabelPicker({ cardId, currentLabel }) {
             class="label-swatch-clear"
             data-on:click={`@post('${base()}cards/${cardId}/label/none')`}
             title="Remove label"
-          >×</button>
+          ><Icon name="lucide:x" /></button>
         )}
       </div>
     </div>
@@ -1052,7 +1057,7 @@ function Card({ card, uiState, boardId }) {
       } : {})}
     >
       {isSelecting && (
-        <span class="card-select-checkbox">{isSelected ? '\u2611' : '\u2610'}</span>
+        <span class="card-select-checkbox">{isSelected ? <Icon name="lucide:square-check" /> : <Icon name="lucide:square" />}</span>
       )}
       <div class="card-content">
         <span class="card-title">{card.title}</span>
@@ -1064,19 +1069,19 @@ function Card({ card, uiState, boardId }) {
             class="card-edit-btn"
             data-on:click={`@post('${base()}cards/${card.id}/edit')`}
             title="Edit"
-          >&#9998;</button>
+          ><Icon name="lucide:pencil" /></button>
           {boardId && (
             <a
               class="card-expand-btn"
               href={`${base()}boards/${boardId}/cards/${card.id}`}
               title="Open"
-            >&#x2197;</a>
+            ><Icon name="lucide:arrow-up-right" /></a>
           )}
           <button
             class="delete-btn"
             data-on:click__viewtransition={`@delete('${base()}cards/${card.id}')`}
           >
-            ×
+            <Icon name="lucide:x" />
           </button>
         </div>
       )}
@@ -1137,7 +1142,7 @@ function ActionSheet({ card, columns }) {
                 class="label-swatch-clear"
                 data-on:click={`@post('${base()}cards/${card.id}/label/none')`}
                 title="Remove label"
-              >×</button>
+              ><Icon name="lucide:x" /></button>
             )}
           </div>
         </div>
@@ -1173,13 +1178,13 @@ function ColumnSheet({ col, colIndex, columnCount, boardId }) {
             <button
               class="action-sheet-btn"
               data-on:click={`@post('${base()}columns/${col.id}/sheet-move-left')`}
-            >← Move left</button>
+            ><Icon name="lucide:arrow-left" /> Move left</button>
           )}
           {colIndex < columnCount - 1 && (
             <button
               class="action-sheet-btn"
               data-on:click={`@post('${base()}columns/${col.id}/sheet-move-right')`}
-            >Move right →</button>
+            >Move right <Icon name="lucide:arrow-right" /></button>
           )}
         </div>
         {columnCount > 1 && (
@@ -1218,7 +1223,7 @@ function Column({ col, cards, columnCount, uiState, columns, boardId }) {
           <button
             class="col-delete-btn"
             data-on:click__viewtransition={`@delete('${base()}columns/${col.id}')`}
-          >×</button>
+          ><Icon name="lucide:x" /></button>
         )}
       </div>
       <div class="cards-container" data-column-id={col.id}>
@@ -1232,7 +1237,7 @@ function Column({ col, cards, columnCount, uiState, columns, boardId }) {
           data-on:submit__prevent__viewtransition={`@post('${base()}columns/${col.id}/cards', {contentType: 'form'}); evt.target.reset()`}
         >
           <input name="title" type="text" placeholder="Add a card..." autocomplete="off" />
-          <button type="submit">+</button>
+          <button type="submit"><Icon name="lucide:plus" /></button>
         </form>
       )}
     </div>
@@ -1281,7 +1286,7 @@ function TimeTravelBar({ boardId, events, pos }) {
           class="tt-step"
           disabled={pos <= 0}
           data-on:click={`fetch('${seekUrl}', {method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'position=${pos - 1}'})`}
-        >&larr;</button>
+        ><Icon name="lucide:chevron-left" /></button>
         <input
           id="tt-slider"
           type="range"
@@ -1296,7 +1301,7 @@ function TimeTravelBar({ boardId, events, pos }) {
           class="tt-step"
           disabled={pos >= events.length - 1}
           data-on:click={`fetch('${seekUrl}', {method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'position=${pos + 1}'})`}
-        >&rarr;</button>
+        ><Icon name="lucide:chevron-right" /></button>
         <span id="tt-counter" class="tt-counter">{pos + 1} / {events.length}</span>
       </div>
     </div>
@@ -1309,7 +1314,7 @@ function HelpOverlay({ boardId }) {
       <div class="help-overlay" data-on:click__stop="void 0">
         <div class="help-overlay-header">
           <span class="help-overlay-title">Keyboard shortcuts</span>
-          <button class="help-overlay-close" data-on:click={`@post('${base()}boards/${boardId}/help-dismiss')`}>×</button>
+          <button class="help-overlay-close" data-on:click={`@post('${base()}boards/${boardId}/help-dismiss')`}><Icon name="lucide:x" /></button>
         </div>
         <div class="help-overlay-body">
           <div class="help-section">
@@ -1373,7 +1378,7 @@ function CommandMenu({ query, results }) {
     return `@post('${base()}command-menu/close')`
   }
 
-  const TYPE_ICONS = { action: '\u26A1', board: '\u25A1', card: '\uD83C\uDFF7', column: '\u2630' }
+  const TYPE_ICONS = { action: 'lucide:zap', board: 'lucide:layout-dashboard', card: 'lucide:tag', column: 'lucide:columns-3' }
 
   let flatIdx = 0
   return (
@@ -1381,7 +1386,7 @@ function CommandMenu({ query, results }) {
       <div class="command-menu-panel" data-on:click__stop="void 0" data-signals={`{cmdIdx: 0, cmdCount: ${results.length}}`}>
         <form id="command-menu-form" data-on:submit__prevent="void 0">
           <div class="command-menu-input-wrap">
-            <span class="command-menu-icon">{'\u2315'}</span>
+            <span class="command-menu-icon"><Icon name="lucide:search" /></span>
             <input
               id="command-menu-input"
               class="command-menu-input"
@@ -1417,7 +1422,7 @@ function CommandMenu({ query, results }) {
                           {...(r.themeId ? { 'data-theme-preview': r.themeId, 'data-on:mouseenter': `if(window.previewTheme)previewTheme('${r.themeId}')` } : {})}
                         >
                           <span class="command-menu-result-title">
-                            <span class="command-menu-type-icon">{TYPE_ICONS[r.type] || ''}</span>
+                            <span class="command-menu-type-icon">{TYPE_ICONS[r.type] ? <Icon name={TYPE_ICONS[r.type]} /> : ''}</span>
                             {r.type === 'card' && r.label && <span class="command-menu-label-dot" style={`background: ${LABEL_COLORS[r.label] || 'var(--neutral-7)'}`}>{' '}</span>}
                             {r.title}
                           </span>
@@ -1469,7 +1474,7 @@ function Board({ board, columns, cards, uiState, tabCount, connStatus, commandMe
   return (
     <div id="board" class={isTimeTraveling ? 'board--time-travel' : ''}>
       <div id="board-header" class="board-header">
-        <a id="board-back" href={base()} class="back-link">← Boards</a>
+        <a id="board-back" href={base()} class="back-link"><Icon name="lucide:arrow-left" /> Boards</a>
         {isEditingTitle
           ? <form
               id="board-title-form"
@@ -1530,7 +1535,7 @@ function Board({ board, columns, cards, uiState, tabCount, connStatus, commandMe
           data-on:submit__prevent__viewtransition={`@post('${base()}boards/${board.id}/columns', {contentType: 'form'}); evt.target.reset()`}
         >
           <input name="title" type="text" placeholder="Add a column..." autocomplete="off" />
-          <button type="submit">+ Column</button>
+          <button type="submit"><Icon name="lucide:plus" /> Column</button>
         </form>
       )}
       {isSelecting && (
@@ -1596,7 +1601,7 @@ function CardDetail({ card, column, columns, board, events, commandMenu }) {
   return (
     <div id="card-detail" style={`view-transition-name: card-expand${label ? `; --card-label-color: ${LABEL_COLORS[label] || 'var(--neutral-7)'}` : ''}`}>
       <div class="card-detail-header">
-        <a id="card-detail-back" href={`${base()}boards/${board.id}`} class="back-link">← {board.title}</a>
+        <a id="card-detail-back" href={`${base()}boards/${board.id}`} class="back-link"><Icon name="lucide:arrow-left" /> {board.title}</a>
       </div>
       <div class="card-detail-body">
         <div class="card-detail-main">
@@ -1710,7 +1715,7 @@ function BoardCard({ board }) {
       <button
         class="board-delete-btn"
         data-on:click__prevent__viewtransition={`@delete('${base()}boards/${board.id}')`}
-      >×</button>
+      ><Icon name="lucide:x" /></button>
     </div>
   )
 }
@@ -1726,7 +1731,7 @@ function BoardsList({ boards, templates, commandMenu }) {
           data-on:submit__prevent={`@post('${base()}boards', {contentType: 'form'})`}
         >
           <input name="title" type="text" placeholder="New board name..." autocomplete="off" />
-          <button type="submit">+ Board</button>
+          <button type="submit"><Icon name="lucide:plus" /> Board</button>
         </form>
       </div>
       {templates && templates.length > 0 && (
@@ -3241,6 +3246,7 @@ function Shell({ path, children }) {
           type="module"
           src="https://cdn.jsdelivr.net/gh/starfederation/datastar@1.0.0-RC.8/bundles/datastar.js"
         ></script>
+        <script src="https://cdn.jsdelivr.net/npm/iconify-icon@2/dist/iconify-icon.min.js"></script>
         {isBoardPage && <script src={`${base()}${__KANBAN_JS__}`}></script>}
         {!isBoardPage && <script type="speculationrules">{raw(JSON.stringify({
           prefetch: [{
@@ -3714,9 +3720,10 @@ function EventsPage({ boards, boardFilter }) {
           type="module"
           src="https://cdn.jsdelivr.net/gh/starfederation/datastar@1.0.0-RC.8/bundles/datastar.js"
         ></script>
+        <script src="https://cdn.jsdelivr.net/npm/iconify-icon@2/dist/iconify-icon.min.js"></script>
       </head>
       <body>
-        <h1>Event Log <span><a href={base()}>← boards</a></span></h1>
+        <h1>Event Log <span><a href={base()}><Icon name="lucide:arrow-left" /> boards</a></span></h1>
         <div class="actions">
           <select class="board-filter" onchange={`window.location.href='${base()}events' + (this.value ? '?board=' + this.value : '')`}>
             <option value="">All boards</option>
