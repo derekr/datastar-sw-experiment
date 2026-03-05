@@ -1066,19 +1066,19 @@ function Card({ card, uiState, boardId }) {
       {!isSelecting && !isReadOnly && (
         <div class="card-actions">
           <button
-            class="card-edit-btn"
+            class="card-edit-btn icon-btn"
             data-on:click={`@post('${base()}cards/${card.id}/edit')`}
             title="Edit"
           ><Icon name="lucide:pencil" /></button>
           {boardId && (
             <a
-              class="card-expand-btn"
+              class="card-expand-btn icon-btn"
               href={`${base()}boards/${boardId}/cards/${card.id}`}
               title="Open"
             ><Icon name="lucide:arrow-up-right" /></a>
           )}
           <button
-            class="delete-btn"
+            class="delete-btn icon-btn icon-btn--danger"
             data-on:click__viewtransition={`@delete('${base()}cards/${card.id}')`}
           >
             <Icon name="lucide:x" />
@@ -1223,7 +1223,7 @@ function Column({ col, cards, columnCount, uiState, columns, boardId }) {
         <span class="count">{colCards.length}</span>
         {!isReadOnly && columnCount > 1 && (
           <button
-            class="col-delete-btn"
+            class="col-delete-btn icon-btn icon-btn--danger"
             data-on:click__viewtransition={`@delete('${base()}columns/${col.id}')`}
           ><Icon name="lucide:x" /></button>
         )}
@@ -1316,7 +1316,7 @@ function HelpOverlay({ boardId }) {
       <div class="help-overlay" data-on:click__stop="void 0">
         <div class="help-overlay-header">
           <span class="help-overlay-title">Keyboard shortcuts</span>
-          <button class="help-overlay-close" data-on:click={`@post('${base()}boards/${boardId}/help-dismiss')`}><Icon name="lucide:x" /></button>
+          <button class="help-overlay-close icon-btn" data-on:click={`@post('${base()}boards/${boardId}/help-dismiss')`}><Icon name="lucide:x" /></button>
         </div>
         <div class="help-overlay-body">
           <div class="help-section">
@@ -1494,7 +1494,7 @@ function Board({ board, columns, cards, uiState, tabCount, connStatus, commandMe
               {!isTimeTraveling && (
                 <button
                   id="board-title-edit-btn"
-                  class="board-title-edit-btn"
+                  class="board-title-edit-btn icon-btn"
                   data-on:click={`@post('${base()}boards/${board.id}/title-edit')`}
                   title="Edit board title"
                 ><Icon name="lucide:pencil" /></button>
@@ -1727,7 +1727,7 @@ function BoardCard({ board }) {
         </div>
       </a>
       <button
-        class="board-delete-btn"
+        class="board-delete-btn icon-btn icon-btn--danger"
         data-on:click__prevent__viewtransition={`@delete('${base()}boards/${board.id}')`}
       ><Icon name="lucide:x" /></button>
     </div>
@@ -1903,6 +1903,17 @@ body {
   padding-right: env(safe-area-inset-right, 0px);
 }
 
+/* ── Shared icon-only button ─────────────────────────── */
+.icon-btn {
+  background: none; border: none; color: var(--neutral-6); cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center;
+  padding: 6px; border-radius: 4px; line-height: 1;
+  font-size: var(--font-size--1);
+  transition: color var(--anim-duration-fast), background var(--anim-duration-fast);
+}
+.icon-btn:hover { background: var(--neutral-5); color: var(--neutral-11); }
+.icon-btn--danger:hover { color: var(--error-7); }
+
 /* ── Boards list ─────────────────────────────────────── */
 
 #boards-list {
@@ -1944,19 +1955,7 @@ body {
   position: absolute;
   top: 8px;
   right: 8px;
-  background: none;
-  border: none;
-  color: var(--neutral-6);
-  cursor: pointer;
-  font-size: var(--font-size-1);
-  line-height: 1;
-  padding: 6px 8px;
-  min-width: 44px;
-  min-height: 44px;
-  display: grid;
-  place-items: center;
 }
-.board-delete-btn:hover { color: var(--error-7); }
 
 .board-new {
   background: transparent;
@@ -2083,12 +2082,7 @@ input:not(#_), textarea:not(#_), select:not(#_) { font-size: max(1rem, 16px); }
   color: var(--neutral-11);
 }
 .board-back-title:hover { color: var(--primary-7); text-decoration: none; }
-.board-title-edit-btn {
-  background: none; border: none; color: var(--neutral-6); cursor: pointer;
-  font-size: var(--font-size--2); padding: 4px; line-height: 1;
-  display: inline-flex; align-items: center;
-  transition: color var(--anim-duration-fast);
-}
+.board-title-edit-btn { font-size: var(--font-size--2); padding: 4px; }
 .board-title-edit-btn:hover { color: var(--primary-7); }
 .board-title-form {
   display: flex;
@@ -2191,22 +2185,7 @@ input:not(#_), textarea:not(#_), select:not(#_) { font-size: max(1rem, 16px); }
   flex: 1;
 }
 
-.col-delete-btn {
-  background: none;
-  border: none;
-  color: var(--neutral-6);
-  cursor: pointer;
-  font-size: var(--font-size--1);
-  padding: 6px;
-  min-width: 44px;
-  min-height: 44px;
-  display: grid;
-  place-items: center;
-  line-height: 1;
-  transition: color var(--anim-duration-fast);
-}
-
-.col-delete-btn:hover { color: var(--error-7); }
+/* col-delete-btn: positioning only — base styles from .icon-btn */
 
 .count {
   font-size: var(--font-size--2);
@@ -2266,14 +2245,8 @@ input:not(#_), textarea:not(#_), select:not(#_) { font-size: max(1rem, 16px); }
 .card-desc { font-size: var(--font-size--2); color: var(--neutral-8); margin: 4px 0 0; word-break: break-word; }
 .card-actions { display: flex; align-items: center; gap: 0; flex-shrink: 0; margin-left: 4px; }
 
-.card-edit-btn {
-  background: none; border: none; color: var(--neutral-6); cursor: pointer;
-  font-size: var(--font-size--1); padding: 6px;
-  display: inline-flex; align-items: center; justify-content: center;
-  line-height: 1; transition: color var(--anim-duration-fast);
-  border-radius: 4px;
-}
-.card-edit-btn:hover { color: var(--primary-7); background: var(--neutral-5); }
+.card-edit-btn iconify-icon { font-size: 0.85em; }
+.card-edit-btn:hover { color: var(--primary-7); }
 
 .card-edit-form {
   width: 100%; margin-top: 8px; display: flex; flex-direction: column; gap: var(--size-0);
@@ -2377,23 +2350,7 @@ input:not(#_), textarea:not(#_), select:not(#_) { font-size: max(1rem, 16px); }
   .card, .column { touch-action: none; }
 }
 
-.delete-btn {
-  background: none;
-  border: none;
-  color: var(--neutral-6);
-  cursor: pointer;
-  font-size: var(--font-size--1);
-  padding: 6px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  line-height: 1;
-  transition: color var(--anim-duration-fast);
-  border-radius: 4px;
-}
-
-.delete-btn:hover { color: var(--error-7); background: var(--neutral-5); }
+.delete-btn { flex-shrink: 0; }
 
 .add-form {
   display: flex;
@@ -2585,16 +2542,7 @@ input:not(#_), textarea:not(#_), select:not(#_) { font-size: max(1rem, 16px); }
   font-weight: var(--font-weight-semi-bold);
   color: var(--neutral-11);
 }
-.help-overlay-close {
-  background: none;
-  border: none;
-  color: var(--neutral-8);
-  font-size: var(--font-size-1);
-  cursor: pointer;
-  padding: 4px 8px;
-  border-radius: 4px;
-}
-.help-overlay-close:hover { background: var(--neutral-5); color: var(--neutral-11); }
+.help-overlay-close { font-size: var(--font-size-1); color: var(--neutral-8); padding: 4px 8px; }
 
 .help-section { margin-bottom: var(--size-0); }
 .help-section:last-child { margin-bottom: 0; }
@@ -3197,26 +3145,8 @@ input:not(#_), textarea:not(#_), select:not(#_) { font-size: max(1rem, 16px); }
   border-top: 1px solid var(--neutral-5);
 }
 
-/* Expand button on board cards */
-.card-expand-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border: none;
-  background: none;
-  color: var(--neutral-6);
-  cursor: pointer;
-  border-radius: 4px;
-  font-size: var(--font-size--1);
-  text-decoration: none;
-  line-height: 1;
-  padding: 6px;
-  transition: color var(--anim-duration-fast), background var(--anim-duration-fast);
-}
-.card-expand-btn:hover {
-  background: var(--neutral-5);
-  color: var(--neutral-11);
-}
+/* card-expand-btn: base styles from .icon-btn */
+.card-expand-btn { text-decoration: none; }
 
 /* Generic button styles */
 .btn {
