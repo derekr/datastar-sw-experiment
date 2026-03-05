@@ -111,6 +111,119 @@ const LABEL_COLORS = {
   pink: '#ec4899',
 }
 
+// --- Board templates ---
+// Templates are pre-defined event arrays. On first access, they're compressed
+// to base64url hash fragments so the existing import flow handles everything.
+
+function templateEvent(type, data) {
+  return { id: crypto.randomUUID(), type, v: EVENT_VERSIONS[type], data, ts: Date.now(), synced: false, correlationId: null, causationId: null, actorId: null }
+}
+
+function buildTemplateEvents(title, columns) {
+  const boardId = 'tpl-board'
+  const events = [templateEvent('board.created', { id: boardId, title, createdAt: Date.now() })]
+  for (const col of columns) {
+    const colId = `tpl-col-${col.title.toLowerCase().replace(/\s+/g, '-')}`
+    events.push(templateEvent('column.created', { id: colId, title: col.title, position: col.position, boardId }))
+    if (col.cards) {
+      for (const card of col.cards) {
+        const cardId = `tpl-card-${crypto.randomUUID().slice(0, 8)}`
+        events.push(templateEvent('card.created', { id: cardId, columnId: colId, title: card.title, position: card.position }))
+        if (card.description) {
+          events.push(templateEvent('card.descriptionUpdated', { id: cardId, description: card.description }))
+        }
+        if (card.label) {
+          events.push(templateEvent('card.labelUpdated', { id: cardId, label: card.label }))
+        }
+      }
+    }
+  }
+  return events
+}
+
+const BOARD_TEMPLATES = [
+  {
+    id: 'kanban',
+    title: 'Kanban',
+    description: 'To Do / In Progress / Done',
+    events: () => buildTemplateEvents('Kanban', [
+      { title: 'To Do', position: 'a0', cards: [
+        { title: 'Define project scope', position: 'a0', label: 'blue' },
+        { title: 'Research competitors', position: 'a1' },
+        { title: 'Draft initial wireframes', position: 'a2', label: 'purple' },
+      ]},
+      { title: 'In Progress', position: 'a1', cards: [
+        { title: 'Set up dev environment', position: 'a0', label: 'green' },
+      ]},
+      { title: 'Done', position: 'a2', cards: [] },
+    ]),
+  },
+  {
+    id: 'sprint',
+    title: 'Sprint Board',
+    description: 'Backlog / Sprint / In Review / Done',
+    events: () => buildTemplateEvents('Sprint Board', [
+      { title: 'Backlog', position: 'a0', cards: [
+        { title: 'User authentication', position: 'a0', label: 'red', description: 'OAuth + email/password login' },
+        { title: 'Dashboard analytics', position: 'a1', label: 'blue' },
+        { title: 'Export to CSV', position: 'a2' },
+      ]},
+      { title: 'Sprint', position: 'a1', cards: [
+        { title: 'API rate limiting', position: 'a0', label: 'orange' },
+        { title: 'Fix pagination bug', position: 'a1', label: 'red' },
+      ]},
+      { title: 'In Review', position: 'a2', cards: [] },
+      { title: 'Done', position: 'a3', cards: [] },
+    ]),
+  },
+  {
+    id: 'personal',
+    title: 'Personal',
+    description: 'Today / This Week / Later / Done',
+    events: () => buildTemplateEvents('Personal', [
+      { title: 'Today', position: 'a0', cards: [
+        { title: 'Morning workout', position: 'a0', label: 'green' },
+        { title: 'Grocery shopping', position: 'a1' },
+      ]},
+      { title: 'This Week', position: 'a1', cards: [
+        { title: 'Schedule dentist', position: 'a0', label: 'yellow' },
+        { title: 'Read chapter 5', position: 'a1', label: 'purple' },
+      ]},
+      { title: 'Later', position: 'a2', cards: [
+        { title: 'Plan weekend trip', position: 'a0', label: 'blue' },
+      ]},
+      { title: 'Done', position: 'a3', cards: [] },
+    ]),
+  },
+  {
+    id: 'project',
+    title: 'Project Tracker',
+    description: 'Ideas / Planning / Active / Shipped',
+    events: () => buildTemplateEvents('Project Tracker', [
+      { title: 'Ideas', position: 'a0', cards: [
+        { title: 'Mobile app redesign', position: 'a0', label: 'purple' },
+        { title: 'Public API', position: 'a1', label: 'blue' },
+      ]},
+      { title: 'Planning', position: 'a1', cards: [
+        { title: 'v2.0 launch', position: 'a0', label: 'orange', description: 'Target Q2 — new onboarding flow + perf improvements' },
+      ]},
+      { title: 'Active', position: 'a2', cards: [] },
+      { title: 'Shipped', position: 'a3', cards: [] },
+    ]),
+  },
+]
+
+// Cache compressed template hashes (computed on first access)
+const _templateHashCache = new Map()
+async function getTemplateHash(tpl) {
+  if (!_templateHashCache.has(tpl.id)) {
+    const events = tpl.events()
+    const hash = await compressToBase64url(JSON.stringify(events))
+    _templateHashCache.set(tpl.id, hash)
+  }
+  return _templateHashCache.get(tpl.id)
+}
+
 // Upcasters transform old event versions to current during replay.
 // When a schema changes, bump the version above and add a transform here.
 const upcasters = {
@@ -1600,7 +1713,7 @@ function BoardCard({ board }) {
   )
 }
 
-function BoardsList({ boards, commandMenu }) {
+function BoardsList({ boards, templates, commandMenu }) {
   return (
     <div id="boards-list">
       <h1>Boards</h1>
@@ -1614,12 +1727,62 @@ function BoardsList({ boards, commandMenu }) {
           <button type="submit">+ Board</button>
         </form>
       </div>
+      {templates && templates.length > 0 && (
+        <div id="templates-section">
+          <h2 class="templates-heading">Start from a template</h2>
+          <div class="templates-grid">
+            {templates.map(t => (
+              <button
+                class="template-card"
+                id={`template-${t.id}`}
+                data-template-hash={t.hash}
+              >
+                <span class="template-card-icon">{
+                  t.id === 'kanban' ? '\u{1F4CB}' :
+                  t.id === 'sprint' ? '\u{1F3C3}' :
+                  t.id === 'personal' ? '\u{2705}' :
+                  '\u{1F680}'
+                }</span>
+                <span class="template-card-title">{t.title}</span>
+                <span class="template-card-desc">{t.description}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
       <div class="boards-toolbar">
         <button class="toolbar-btn" id="export-btn">Export</button>
         <button class="toolbar-btn" id="import-btn">Import</button>
         <input type="file" id="import-file" accept=".json" style="display:none" />
       </div>
       <script>{raw(`
+        // Template card click handler — POST compressed hash directly to import
+        document.querySelectorAll('.template-card[data-template-hash]').forEach(function(btn) {
+          btn.addEventListener('click', async function() {
+            var hash = this.getAttribute('data-template-hash');
+            if (!hash) return;
+            // Disable all template buttons to prevent double-click
+            document.querySelectorAll('.template-card').forEach(function(b) { b.disabled = true; });
+            this.querySelector('.template-card-title').textContent = 'Creating...';
+            try {
+              var resp = await fetch('${base()}import', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ data: hash })
+              });
+              var result = await resp.json();
+              if (resp.ok && result.boardId) {
+                window.location.href = '${base()}boards/' + result.boardId;
+              } else {
+                alert('Template failed: ' + (result.error || resp.statusText));
+                document.querySelectorAll('.template-card').forEach(function(b) { b.disabled = false; });
+              }
+            } catch(err) {
+              alert('Template failed: ' + err.message);
+              document.querySelectorAll('.template-card').forEach(function(b) { b.disabled = false; });
+            }
+          });
+        });
         document.getElementById('export-btn').addEventListener('click', async function() {
           var resp = await fetch('${base()}export');
           var blob = await resp.blob();
@@ -1637,13 +1800,53 @@ function BoardsList({ boards, commandMenu }) {
           var file = e.target.files[0];
           if (!file) return;
           var text = await file.text();
-          var resp = await fetch('${base()}import', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: text
-          });
-          if (resp.ok) window.location.reload();
-          else alert('Import failed: ' + resp.statusText);
+          // File import: compress events to base64url and POST as { data: compressed }
+          // so it goes through the same validated import route as share URLs
+          try {
+            var events = JSON.parse(text);
+            if (!Array.isArray(events)) throw new Error('Expected array');
+            // Compress using browser-native CompressionStream
+            var jsonStr = JSON.stringify(events);
+            var encoded = new TextEncoder().encode(jsonStr);
+            var cs = new CompressionStream('deflate');
+            var writer = cs.writable.getWriter();
+            writer.write(encoded);
+            writer.close();
+            var reader = cs.readable.getReader();
+            var chunks = [];
+            while (true) {
+              var result = await reader.read();
+              if (result.done) break;
+              chunks.push(result.value);
+            }
+            var totalLen = chunks.reduce(function(s,c) { return s + c.length; }, 0);
+            var merged = new Uint8Array(totalLen);
+            var offset = 0;
+            for (var i = 0; i < chunks.length; i++) {
+              merged.set(chunks[i], offset);
+              offset += chunks[i].length;
+            }
+            // base64url encode in 32K chunks to avoid RangeError
+            var CHUNK = 32768;
+            var b64 = '';
+            for (var j = 0; j < merged.length; j += CHUNK) {
+              b64 += String.fromCharCode.apply(null, merged.subarray(j, j + CHUNK));
+            }
+            b64 = btoa(b64).replace(/\\+/g, '-').replace(/\\//g, '_').replace(/=+$/, '');
+            var resp = await fetch('${base()}import', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ data: b64 })
+            });
+            var result = await resp.json();
+            if (resp.ok && result.boardId) {
+              window.location.href = '${base()}boards/' + result.boardId;
+            } else {
+              alert('Import failed: ' + (result.error || resp.statusText));
+            }
+          } catch(err) {
+            alert('Import failed: ' + err.message);
+          }
           e.target.value = '';
         });
       `)}</script>
@@ -1788,6 +1991,61 @@ input:not(#_), textarea:not(#_), select:not(#_) { font-size: max(1rem, 16px); }
   transition: background 0.15s, color 0.15s;
 }
 .toolbar-btn:hover { background: #334155; color: #e2e8f0; }
+
+/* ── Templates ───────────────────────────────────────── */
+
+#templates-section {
+  margin-top: clamp(24px, 4vw, 40px);
+}
+.templates-heading {
+  font-size: clamp(0.875rem, 0.75rem + 0.5vw, 1rem);
+  font-weight: 500;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: clamp(10px, 2vw, 16px);
+}
+.templates-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(160px, 100%), 1fr));
+  gap: clamp(8px, 1.5vw, 12px);
+}
+.template-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: clamp(14px, 3vw, 20px) clamp(10px, 2vw, 14px);
+  background: #1e293b;
+  border: 1px solid #334155;
+  border-radius: 12px;
+  text-decoration: none;
+  color: inherit;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+  text-align: center;
+}
+.template-card:hover {
+  border-color: #6366f1;
+  background: #1e293b;
+}
+.template-card:active {
+  background: #334155;
+}
+.template-card-icon {
+  font-size: 1.5rem;
+  line-height: 1;
+}
+.template-card-title {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #e2e8f0;
+}
+.template-card-desc {
+  font-size: 0.75rem;
+  color: #64748b;
+  line-height: 1.3;
+}
 
 /* ── Board detail ───────────────────────────────────── */
 
@@ -3505,9 +3763,10 @@ app.get('/', async (c) => {
 
   if (c.req.header('Datastar-Request') === 'true') {
     return streamSSE(c, async (stream) => {
+      const templateHashes = await Promise.all(BOARD_TEMPLATES.map(async t => ({ id: t.id, title: t.title, description: t.description, hash: await getTemplateHash(t) })))
       const push = async (selector, mode, opts) => {
         const boards = await getBoards()
-        await stream.writeSSE(dsePatch(selector, <BoardsList boards={boards} commandMenu={globalUIState.commandMenu} />, mode, opts))
+        await stream.writeSSE(dsePatch(selector, <BoardsList boards={boards} templates={templateHashes} commandMenu={globalUIState.commandMenu} />, mode, opts))
       }
 
       const handler = (e) => {
@@ -3541,7 +3800,8 @@ app.get('/', async (c) => {
   }
 
   const boards = await getBoards()
-  return c.html('<!DOCTYPE html>' + (<Shell path="/"><BoardsList boards={boards} commandMenu={globalUIState.commandMenu} /></Shell>).toString())
+  const templateHashes = await Promise.all(BOARD_TEMPLATES.map(async t => ({ id: t.id, title: t.title, description: t.description, hash: await getTemplateHash(t) })))
+  return c.html('<!DOCTYPE html>' + (<Shell path="/"><BoardsList boards={boards} templates={templateHashes} commandMenu={globalUIState.commandMenu} /></Shell>).toString())
 })
 
 // Command: create board
