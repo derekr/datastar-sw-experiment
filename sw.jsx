@@ -14,6 +14,52 @@ function base() {
   return _base
 }
 
+// --- Compression helpers (board sharing) ---
+
+async function compressToBase64url(jsonStr) {
+  const buf = new TextEncoder().encode(jsonStr)
+  const cs = new CompressionStream('deflate')
+  const writer = cs.writable.getWriter()
+  writer.write(buf)
+  writer.close()
+  const chunks = []
+  const reader = cs.readable.getReader()
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    chunks.push(value)
+  }
+  const total = chunks.reduce((n, c) => n + c.length, 0)
+  const merged = new Uint8Array(total)
+  let offset = 0
+  for (const c of chunks) { merged.set(c, offset); offset += c.length }
+  // base64url: standard base64 with +/ → -_ and no padding
+  const b64 = btoa(String.fromCharCode(...merged))
+  return b64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+}
+
+async function decompressFromBase64url(b64url) {
+  const b64 = b64url.replace(/-/g, '+').replace(/_/g, '/') + '=='.slice(0, (4 - b64url.length % 4) % 4)
+  const bin = atob(b64)
+  const buf = Uint8Array.from(bin, c => c.charCodeAt(0))
+  const ds = new DecompressionStream('deflate')
+  const writer = ds.writable.getWriter()
+  writer.write(buf)
+  writer.close()
+  const chunks = []
+  const reader = ds.readable.getReader()
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    chunks.push(value)
+  }
+  const total = chunks.reduce((n, c) => n + c.length, 0)
+  const merged = new Uint8Array(total)
+  let offset = 0
+  for (const c of chunks) { merged.set(c, offset); offset += c.length }
+  return new TextDecoder().decode(merged)
+}
+
 // --- Event Sourcing ---
 
 // Event schema versions. Bump when event shape changes.
@@ -1175,6 +1221,10 @@ function CommandMenu({ query, results }) {
     if (r.popupUrl) {
       return `fetch('${base()}command-menu/close',{method:'POST'}).then(function(){window.open('${r.popupUrl}','${r.popupName || '_blank'}','width=720,height=640')})`
     }
+    // Inline JS action: close menu + run arbitrary JS
+    if (r.jsAction) {
+      return `fetch('${base()}command-menu/close',{method:'POST'}).then(function(){${r.jsAction}})`
+    }
     // Board navigation
     if (r.href) {
       return `fetch('${base()}command-menu/close',{method:'POST'}).then(function(){window.location.href='${r.href}'})`
@@ -1309,6 +1359,23 @@ function Board({ board, columns, cards, uiState, tabCount, connStatus, commandMe
             class="select-mode-btn"
             data-on:click={`@post('${base()}boards/${board.id}/time-travel')`}
           >History</button>
+        )}
+        {!isSelecting && !isTimeTraveling && (
+          <button
+            id="share-btn"
+            class="select-mode-btn"
+            data-on:click={`
+              fetch('${base()}boards/${board.id}/share', {method:'POST'})
+                .then(r => r.json())
+                .then(d => {
+                  var url = location.origin + d.shareUrl;
+                  navigator.clipboard.writeText(url).then(function() {
+                    var btn = document.getElementById('share-btn');
+                    if (btn) { btn.textContent = 'Copied!'; setTimeout(function(){ btn.textContent = 'Share'; }, 2000); }
+                  });
+                })
+            `}
+          >Share</button>
         )}
       </div>
       {isTimeTraveling && (
@@ -2906,6 +2973,32 @@ function Shell({ path, children }) {
           {children || <p>Loading...</p>}
         </main>
         <script>{raw(`
+          // Board import: detect #import=<compressed> in URL hash
+          (function() {
+            var m = location.hash.match(/^#import=(.+)$/);
+            if (!m) return;
+            var data = m[1];
+            history.replaceState(null, '', location.pathname + location.search);
+            var app = document.getElementById('app');
+            if (app) app.innerHTML = '<p>Importing board...</p>';
+            // Remove data-init to prevent SSE stream from starting during import
+            if (app) app.removeAttribute('data-init');
+            fetch('${base()}import', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ data: data }),
+            }).then(function(r) { return r.json(); }).then(function(result) {
+              if (result.boardId) {
+                window.location.replace('${base()}boards/' + result.boardId);
+              } else {
+                window.location.replace('${base()}');
+              }
+            }).catch(function(e) {
+              console.error('Board import failed:', e);
+              if (app) app.innerHTML = '<p>Import failed. <a href="${base()}">Go to boards</a></p>';
+            });
+          })();
+
           if (navigator.serviceWorker) {
             navigator.serviceWorker.addEventListener('controllerchange', () => {
               window.location.reload();
@@ -3463,6 +3556,84 @@ app.delete('/boards/:boardId', async (c) => {
     id: c.req.param('boardId'),
   }))
   return c.body(null, 204)
+})
+
+// ── Board sharing ────────────────────────────────────────────────────────────
+
+// Export: compress board events into a share URL hash fragment
+app.post('/boards/:boardId/share', async (c) => {
+  await initialize()
+  const boardId = c.req.param('boardId')
+  const db = await dbPromise
+  const allEvents = await db.getAll('events')
+  // Collect events belonging to this board (board.*, column.*, card.*)
+  const tx = db.transaction(ALL_STORES, 'readonly')
+  const boardEvents = []
+  for (const evt of allEvents) {
+    const bid = await boardIdForEvent(evt, tx)
+    if (bid === boardId) boardEvents.push(evt)
+  }
+  // Strip runtime-only fields (seq, synced) for portability
+  const portable = boardEvents.map(({ seq, synced, _boardId, ...rest }) => rest)
+  const json = JSON.stringify(portable)
+  const compressed = await compressToBase64url(json)
+  const shareUrl = `${base()}#import=${compressed}`
+  return c.json({ shareUrl, eventCount: portable.length, compressedSize: compressed.length })
+})
+
+// Import: receive compressed events from hash fragment, replay into local store
+app.post('/import', async (c) => {
+  await initialize()
+  const { data } = await c.req.json()
+  const json = await decompressFromBase64url(data)
+  const events = JSON.parse(json)
+  // Re-assign new IDs to the board so imports don't collide with existing data.
+  // Map old entity IDs → new IDs for board, columns, and cards.
+  const idMap = new Map()
+  function remap(oldId) {
+    if (!idMap.has(oldId)) idMap.set(oldId, crypto.randomUUID())
+    return idMap.get(oldId)
+  }
+  const remapped = events.map(evt => {
+    const e = { ...evt, id: crypto.randomUUID(), synced: false }
+    const d = { ...e.data }
+    switch (e.type) {
+      case 'board.created':
+      case 'board.titleUpdated':
+      case 'board.deleted':
+        d.id = remap(evt.data.id)
+        break
+      case 'column.created':
+        d.id = remap(evt.data.id)
+        d.boardId = remap(evt.data.boardId)
+        break
+      case 'column.deleted':
+      case 'column.moved':
+        d.id = remap(evt.data.id)
+        break
+      case 'card.created':
+        d.id = remap(evt.data.id)
+        d.columnId = remap(evt.data.columnId)
+        break
+      case 'card.moved':
+        d.id = remap(evt.data.id)
+        if (d.columnId) d.columnId = remap(evt.data.columnId)
+        break
+      case 'card.titleUpdated':
+      case 'card.descriptionUpdated':
+      case 'card.labelUpdated':
+      case 'card.deleted':
+        d.id = remap(evt.data.id)
+        break
+    }
+    e.data = d
+    return e
+  })
+  await appendEvents(remapped)
+  // Find the new board ID
+  const boardEvt = remapped.find(e => e.type === 'board.created')
+  const newBoardId = boardEvt ? boardEvt.data.id : null
+  return c.json({ boardId: newBoardId, eventCount: remapped.length })
 })
 
 // ── Board detail ─────────────────────────────────────────────────────────────
@@ -4101,10 +4272,16 @@ async function buildCommandMenuResults(query, context) {
 
   // --- Contextual actions (state-aware) ---
   const actions = []
+  const shareAction = currentBoardId ? {
+    type: 'action', id: 'a-share', title: 'Share board', subtitle: 'Copy link', group: 'Actions',
+    jsAction: `fetch('${base()}boards/${currentBoardId}/share',{method:'POST'}).then(function(r){return r.json()}).then(function(d){var url=location.origin+d.shareUrl;navigator.clipboard.writeText(url)})`
+  } : null
+
   if (currentBoardId && isCardDetail) {
     // Card detail page — show navigation actions only
     actions.push(
       { type: 'action', id: 'a-back-board', title: 'Back to board', subtitle: '', group: 'Actions', href: `${base()}boards/${currentBoardId}` },
+      shareAction,
       { type: 'action', id: 'a-events', title: 'Event log', subtitle: 'This board', group: 'Actions', popupUrl: `${base()}events?board=${currentBoardId}`, popupName: 'event-log' },
       { type: 'action', id: 'a-events-all', title: 'Event log (all)', subtitle: 'All boards', group: 'Actions', popupUrl: `${base()}events`, popupName: 'event-log' },
       { type: 'action', id: 'a-boards', title: 'All boards', subtitle: '', group: 'Actions', href: base() },
@@ -4148,6 +4325,7 @@ async function buildCommandMenuResults(query, context) {
     // Always available regardless of mode
     actions.push(
       { type: 'action', id: 'a-help', title: ui.showHelp ? 'Close help' : 'Keyboard shortcuts', subtitle: '?', group: 'Actions', actionUrl: `${base()}boards/${currentBoardId}/help` },
+      shareAction,
       { type: 'action', id: 'a-events', title: 'Event log', subtitle: 'This board', group: 'Actions', popupUrl: `${base()}events?board=${currentBoardId}`, popupName: 'event-log' },
       { type: 'action', id: 'a-events-all', title: 'Event log (all)', subtitle: 'All boards', group: 'Actions', popupUrl: `${base()}events`, popupName: 'event-log' },
       { type: 'action', id: 'a-boards', title: 'All boards', subtitle: '', group: 'Actions', href: base() },

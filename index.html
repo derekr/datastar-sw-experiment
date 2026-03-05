@@ -48,6 +48,31 @@
           await navigator.serviceWorker.ready;
           setTimeout(reloadOnce, 3000);
         }
+
+        // Board import: detect #import=<compressed> in URL hash
+        const importMatch = location.hash.match(/^#import=(.+)$/);
+        if (importMatch && navigator.serviceWorker.controller) {
+          const data = importMatch[1];
+          // Clear the hash immediately so reload doesn't re-import
+          history.replaceState(null, '', location.pathname + location.search);
+          try {
+            const scope = reg.scope.replace(location.origin, '');
+            const res = await fetch(scope + 'import', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ data }),
+            });
+            const result = await res.json();
+            if (result.boardId) {
+              window.location.replace(scope + 'boards/' + result.boardId);
+            } else {
+              window.location.reload();
+            }
+          } catch (e) {
+            console.error('Board import failed:', e);
+            document.getElementById('app').innerHTML = '<p>Import failed. <a href="' + location.pathname + '">Go to boards</a></p>';
+          }
+        }
       } catch (error) {
         console.error('Service Worker registration failed:', error);
       }
