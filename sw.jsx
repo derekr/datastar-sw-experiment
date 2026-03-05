@@ -3719,6 +3719,58 @@ body {
   border-radius: 50%;
 }
 
+/* ── Lists ───────────────────────────────────────── */
+
+.docs-list {
+  list-style: none;
+  margin: var(--size-0) 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--size--2);
+}
+.docs-list li {
+  padding-left: 1.2em;
+  position: relative;
+  line-height: 1.7;
+  color: var(--neutral-10);
+}
+.docs-list li::before {
+  content: '—';
+  position: absolute;
+  left: 0;
+  color: var(--neutral-6);
+}
+
+/* ── Event types grid ────────────────────────────── */
+
+.docs-event-types {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: var(--size--1);
+  margin: var(--size-0) 0;
+}
+.docs-event-group {
+  background: var(--neutral-3);
+  border: 1px solid var(--neutral-4);
+  border-radius: var(--border-radius-1);
+  padding: var(--size--1) var(--size-0);
+}
+.docs-event-group h3 {
+  font-size: var(--font-size--2);
+  font-weight: var(--font-weight-semi-bold);
+  color: var(--neutral-8);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 6px;
+}
+.docs-event-group ul {
+  list-style: none;
+}
+.docs-event-group li {
+  font-size: var(--font-size--1);
+  margin-bottom: 2px;
+}
+
 /* ── TOC grid ────────────────────────────────────── */
 
 .docs-toc-section { margin-bottom: var(--size-2); }
@@ -4129,11 +4181,11 @@ function DocsIndexContent({ commandMenu }) {
           <li><strong>Datastar morphs the DOM</strong> — the client-side Datastar library receives the HTML and uses Idiomorph to efficiently diff and patch the live DOM. No virtual DOM, no hydration — just HTML in, DOM out.</li>
         </ol>
 
-        <p>That's the whole architecture. No REST API returning JSON. No client-side state management. No <code>useState</code> or <code>createSignal</code>. The server owns the state, renders the HTML, and pushes it to every connected tab.</p>
+        <p>That's the whole architecture. No REST API returning JSON. No virtual DOM diffing or client-side component rendering. No <code>useState</code> or <code>createSignal</code>. The server owns the state, renders the HTML, and pushes it to every connected tab.</p>
 
         <h3>Why this works</h3>
         <p>This pattern — sometimes called "HTML-over-the-wire" — trades client-side complexity for server-side simplicity. The server already knows the full state, so it can render exactly the right HTML. The client doesn't need to reconcile, cache, or invalidate anything. It just displays what it receives.</p>
-        <p>Datastar makes this practical: it manages SSE connections, applies morphs via Idiomorph (which preserves focus, scroll position, and CSS transitions), and provides a lightweight signal system for the small amount of client-to-server communication that forms need.</p>
+        <p>Datastar leverages SSE as its primary transport — anything you can do with request/response, you can do over SSE with Datastar. It uses Idiomorph to efficiently morph the DOM (preserving focus, scroll position, and CSS transitions), and provides a lightweight signal system for the small amount of client-to-server communication that forms need.</p>
 
         <h3>A note on this demo</h3>
         <p>In this app, the "server" happens to be a service worker running in your browser — which means you can use it offline and everything stays on your device. But the Datastar patterns are identical to what you'd use with Go, Python, Node, or any other backend. The service worker is an implementation detail; the architecture is the lesson.</p>
@@ -4167,11 +4219,21 @@ function DocsIndexContent({ commandMenu }) {
   )
 }
 
-// DocsTopicStubContent: topic stub article content (SSE-pushable)
-function DocsTopicStubContent({ topic, commandMenu }) {
+// DocsPager: prev/next navigation for topic pages
+function DocsPager({ topic }) {
   const idx = DOCS_TOPICS.findIndex(t => t.slug === topic.slug)
   const prev = idx > 0 ? DOCS_TOPICS[idx - 1] : null
   const next = idx < DOCS_TOPICS.length - 1 ? DOCS_TOPICS[idx + 1] : null
+  return (
+    <nav class="docs-pager">
+      {prev ? <a href={`${base()}docs/${prev.slug}`} class="docs-pager-link docs-pager-prev"><ArrowLeftIcon /> {prev.title}</a> : <span />}
+      {next ? <a href={`${base()}docs/${next.slug}`} class="docs-pager-link docs-pager-next">{next.title} <ArrowRightIcon /></a> : <span />}
+    </nav>
+  )
+}
+
+// DocsTopicStubContent: placeholder for topics not yet written
+function DocsTopicStubContent({ topic, commandMenu }) {
   return (
     <DocsInner topic={topic} commandMenu={commandMenu}>
       <h1>{topic.title}</h1>
@@ -4179,12 +4241,175 @@ function DocsTopicStubContent({ topic, commandMenu }) {
       <div class="docs-stub">
         <p>This section is coming soon.</p>
       </div>
-      <nav class="docs-pager">
-        {prev ? <a href={`${base()}docs/${prev.slug}`} class="docs-pager-link docs-pager-prev"><ArrowLeftIcon /> {prev.title}</a> : <span />}
-        {next ? <a href={`${base()}docs/${next.slug}`} class="docs-pager-link docs-pager-next">{next.title} <ArrowRightIcon /></a> : <span />}
-      </nav>
+      <DocsPager topic={topic} />
     </DocsInner>
   )
+}
+
+// --- Topic content components ---
+
+function DocsEventSourcingContent({ topic, commandMenu }) {
+  return (
+    <DocsInner topic={topic} commandMenu={commandMenu}>
+      <h1>{topic.title}</h1>
+
+      <section class="docs-section">
+        <p>Every mutation in this app is recorded as an immutable <strong>event</strong> — a fact about something that happened. Events are never updated or deleted. The current state of the board is derived by replaying these events in order.</p>
+        <p>This is <strong>event sourcing</strong>: the event log is the source of truth, and the visible UI is a projection built from it.</p>
+      </section>
+
+      <section class="docs-section">
+        <h2>What an event looks like</h2>
+        <p>Every event has the same shape:</p>
+        <pre><code>{`{
+  id:            "a1b2c3...",       // unique ID (UUID)
+  type:          "card.created",    // what happened
+  v:             1,                 // schema version
+  data: {                           // type-specific payload
+    id:          "d4e5f6...",
+    columnId:    "g7h8i9...",
+    title:       "Buy groceries",
+    position:    "a0"
+  },
+  ts:            1709654321000,     // when (epoch ms)
+  actorId:       "j0k1l2...",       // which device
+  correlationId: "m3n4o5...",       // links related events
+  causationId:   null               // what caused this event
+}`}</code></pre>
+        <p>The <code>type</code> says what happened. The <code>data</code> carries the minimum payload needed to apply the change. The metadata fields (<code>actorId</code>, <code>correlationId</code>, <code>causationId</code>) exist for debugging and future sync — they're not used by the projection logic.</p>
+      </section>
+
+      <section class="docs-section">
+        <h2>The event types</h2>
+        <p>The app uses 12 event types across three entities:</p>
+        <div class="docs-event-types">
+          <div class="docs-event-group">
+            <h3>Board</h3>
+            <ul>
+              <li><code>board.created</code></li>
+              <li><code>board.titleUpdated</code></li>
+              <li><code>board.deleted</code></li>
+            </ul>
+          </div>
+          <div class="docs-event-group">
+            <h3>Column</h3>
+            <ul>
+              <li><code>column.created</code></li>
+              <li><code>column.moved</code></li>
+              <li><code>column.deleted</code></li>
+            </ul>
+          </div>
+          <div class="docs-event-group">
+            <h3>Card</h3>
+            <ul>
+              <li><code>card.created</code></li>
+              <li><code>card.moved</code></li>
+              <li><code>card.titleUpdated</code></li>
+              <li><code>card.descriptionUpdated</code></li>
+              <li><code>card.labelUpdated</code></li>
+              <li><code>card.deleted</code></li>
+            </ul>
+          </div>
+        </div>
+        <p>Each type is a past-tense fact. Not "create card" (a command) but <code>card.created</code> (something that already happened). This distinction matters: commands can be rejected, but events are already true.</p>
+      </section>
+
+      <section class="docs-section">
+        <h2>Commands write events</h2>
+        <p>User actions hit command routes — <code>POST</code>, <code>PUT</code>, or <code>DELETE</code> endpoints on the server. Each route does three things:</p>
+        <ol class="docs-flow-list">
+          <li><strong>Creates event(s)</strong> — one or more events describing what happened.</li>
+          <li><strong>Appends to the log</strong> — events are persisted to the event store in a single transaction.</li>
+          <li><strong>Returns 204</strong> — no body. The client doesn't need a response because the SSE stream will push the updated UI.</li>
+        </ol>
+        <p>For example, creating a new board appends four events in one batch: one <code>board.created</code> and three <code>column.created</code> events (for the default columns). They share a <code>correlationId</code> so they can be traced as a unit.</p>
+        <pre><code>{`// POST /boards — simplified
+const boardEvt = createEvent('board.created', { id, title, createdAt })
+const colEvents = ['To Do', 'In Progress', 'Done'].map((title, i) =>
+  createEvent('column.created', { id: uuid(), title, boardId: id, position: ... },
+    { correlationId: boardEvt.correlationId, causationId: boardEvt.id })
+)
+await appendEvents([boardEvt, ...colEvents])
+return c.body(null, 204)`}</code></pre>
+      </section>
+
+      <section class="docs-section">
+        <h2>CQRS: reads and writes are separate</h2>
+        <p>This is the CQRS pattern — <strong>Command Query Responsibility Segregation</strong>. The write side (command routes) and the read side (SSE handlers) use different models:</p>
+        <ul class="docs-list">
+          <li><strong>Write side:</strong> command routes append events to the log. They don't read the projection to build a response — they just return 204.</li>
+          <li><strong>Read side:</strong> SSE handlers read from the projection (the derived state) and render full HTML. They never write events.</li>
+        </ul>
+        <p>The projection is the "read model" — three database tables (<code>boards</code>, <code>columns</code>, <code>cards</code>) that hold the current state. When an event is appended, <code>applyEvent</code> updates these tables as a side effect of the write. The SSE handlers just read whatever's there.</p>
+      </section>
+
+      <section class="docs-section">
+        <h2>Projections: deriving state from events</h2>
+        <p>The <code>applyEvent</code> function is a big switch on the event type. Each case makes the smallest possible mutation to the projection:</p>
+        <pre><code>{`function applyEvent(event, tx) {
+  const { type, data } = upcast(event)
+  switch (type) {
+    case 'card.created':
+      tx.objectStore('cards').put(data)
+      break
+    case 'card.moved':
+      // read card, update columnId + position, write back
+      break
+    case 'board.deleted':
+      // delete board, cascade-delete all columns and cards
+      break
+    // ... 9 more cases
+  }
+}`}</code></pre>
+        <p>The projection can always be rebuilt from scratch by clearing the tables and replaying every event. The <code>rebuildProjection</code> function does exactly this — it's used for migrations and available as a debug tool.</p>
+      </section>
+
+      <section class="docs-section">
+        <h2>Snapshots</h2>
+        <p>Replaying thousands of events on every page load would be slow. After a full rebuild, the app saves a <strong>snapshot</strong> — a copy of all three projection tables plus the sequence number of the last event.</p>
+        <p>On the next startup, it restores the snapshot and only replays events that arrived after it. This makes initialization fast regardless of how large the event log grows.</p>
+      </section>
+
+      <section class="docs-section">
+        <h2>Upcasting: evolving the schema</h2>
+        <p>Events are immutable, but schemas evolve. When the app added multi-board support, existing <code>column.created</code> events didn't have a <code>boardId</code> field. Rather than migrating old events, an <strong>upcaster</strong> transforms them on the fly:</p>
+        <pre><code>{`const upcasters = {
+  'column.created': {
+    1: (e) => ({
+      ...e,
+      v: 2,
+      data: { ...e.data, boardId: e.data.boardId || 'default' }
+    }),
+  },
+}`}</code></pre>
+        <p>When <code>applyEvent</code> encounters a v1 <code>column.created</code>, the upcaster promotes it to v2 by adding the missing field. The upcasted version is persisted back so it only transforms once. Upcasters chain — if v3 is defined later, a v1 event would go v1 → v2 → v3.</p>
+      </section>
+
+      <section class="docs-section">
+        <h2>What you get for free</h2>
+        <p>Because the event log is the source of truth, several features come almost for free:</p>
+        <ul class="docs-list">
+          <li><strong>Undo/redo</strong> — record inverse events, append them to undo. The projection updates, SSE pushes the result.</li>
+          <li><strong>Time travel</strong> — replay events up to a specific point to see the board at any moment in history.</li>
+          <li><strong>Export/import</strong> — the event log is the entire dataset. Export it as JSON, import it on another device.</li>
+          <li><strong>Audit trail</strong> — every change is recorded with a timestamp, actor, and causal chain.</li>
+          <li><strong>Multi-tab sync</strong> — multiple tabs share the same event log. The bus notifies all SSE streams, so every tab stays in sync.</li>
+        </ul>
+      </section>
+
+      <DocsPager topic={topic} />
+    </DocsInner>
+  )
+}
+
+// Topic content lookup — returns topic-specific component or falls back to stub
+function DocsTopicContent({ topic, commandMenu }) {
+  switch (topic.slug) {
+    case 'event-sourcing':
+      return <DocsEventSourcingContent topic={topic} commandMenu={commandMenu} />
+    default:
+      return <DocsTopicStubContent topic={topic} commandMenu={commandMenu} />
+  }
 }
 
 function EventsPage({ boards, boardFilter }) {
@@ -5512,14 +5737,14 @@ app.get('/docs/:slug', (c) => {
   if (c.req.header('Datastar-Request') === 'true') {
     return streamSSE(c, async (stream) => {
       const push = async () => {
-        await stream.writeSSE(dsePatch('#docs-page', <DocsTopicStubContent topic={topic} commandMenu={globalUIState.commandMenu} />, 'outer'))
+        await stream.writeSSE(dsePatch('#docs-page', <DocsTopicContent topic={topic} commandMenu={globalUIState.commandMenu} />, 'outer'))
       }
       bus.addEventListener('global:ui', push)
       stream.onAbort(() => bus.removeEventListener('global:ui', push))
       while (!stream.closed) { await stream.sleep(30000) }
     })
   }
-  return c.html('<!DOCTYPE html>' + (<DocsPage title={topic.title} sseUrl={`docs/${topic.slug}`}><DocsTopicStubContent topic={topic} commandMenu={globalUIState.commandMenu} /></DocsPage>).toString())
+  return c.html('<!DOCTYPE html>' + (<DocsPage title={topic.title} sseUrl={`docs/${topic.slug}`}><DocsTopicContent topic={topic} commandMenu={globalUIState.commandMenu} /></DocsPage>).toString())
 })
 
 // Debug: inspect event log (real-time)
