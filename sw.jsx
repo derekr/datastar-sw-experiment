@@ -4,7 +4,9 @@ import { streamSSE } from 'hono/streaming'
 import { openDB } from 'idb'
 import { raw } from 'hono/html'
 import { generateKeyBetween, generateNKeysBetween } from 'fractional-indexing'
-import egKanbanCode from './eg-kanban.js?raw'
+// eg-kanban.js is in public/ — served as a static file by Vite/GH Pages.
+// Not imported here because Safari's SW fetch handler doesn't reliably
+// intercept <script src> subresource requests on SW-served pages.
 
 // Base path derived from SW scope — '/' locally, '/repo-name/' on GitHub Pages.
 // Lazy-init because self.registration isn't available at module parse time.
@@ -3496,11 +3498,6 @@ function EventsPage({ boards, boardFilter }) {
 
 const app = new Hono()
 
-// Serve eg-kanban.js (imported as raw string at build time)
-app.get('/eg-kanban.js', (c) => {
-  return c.body(egKanbanCode, 200, { 'Content-Type': 'application/javascript', 'Cache-Control': 'no-cache' })
-})
-
 // ── Boards list (index) ──────────────────────────────────────────────────────
 
 app.get('/', async (c) => {
@@ -4737,8 +4734,7 @@ self.addEventListener('fetch', (event) => {
   // Let static assets fall through to network/cache.
   // The SW only serves HTML (Hono routes) and SSE streams — all other file
   // types (JS, CSS, images, manifest) are served by the host (Vite / GH Pages).
-  // Exception: eg-kanban.js is served by the SW's Hono route (imported as raw string).
-  if (/\.(js|css|png|svg|ico|woff2?|json|webmanifest)(\?.*)?$/.test(url.pathname) && !url.pathname.endsWith('/eg-kanban.js')) return
+  if (/\.(js|css|png|svg|ico|woff2?|json|webmanifest)(\?.*)?$/.test(url.pathname)) return
   // Strip the SW scope prefix so Hono routes match regardless of base path.
   // e.g. /datastar-sw-experiment/boards/123 → /boards/123
   const scope = new URL(self.registration.scope).pathname
