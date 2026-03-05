@@ -3940,6 +3940,7 @@ async function buildCommandMenuResults(query, context) {
 
   const boardMatch = context.match(/\/boards\/([^/]+)/)
   const currentBoardId = boardMatch ? boardMatch[1] : null
+  const isCardDetail = /\/boards\/[^/]+\/cards\//.test(context)
 
   const boards = await db.getAll('boards')
   const columns = await db.getAll('columns')
@@ -3961,7 +3962,13 @@ async function buildCommandMenuResults(query, context) {
 
   // --- Contextual actions (state-aware) ---
   const actions = []
-  if (currentBoardId) {
+  if (currentBoardId && isCardDetail) {
+    // Card detail page — show navigation actions only
+    actions.push(
+      { type: 'action', id: 'a-back-board', title: 'Back to board', subtitle: '', group: 'Actions', href: `${base()}boards/${currentBoardId}` },
+      { type: 'action', id: 'a-boards', title: 'All boards', subtitle: '', group: 'Actions', href: base() },
+    )
+  } else if (currentBoardId) {
     const ui = getUIState(currentBoardId)
     const isSelecting = ui.selectionMode
     const isTimeTraveling = ui.timeTravelPos >= 0
@@ -4057,10 +4064,13 @@ async function buildCommandMenuResults(query, context) {
   }
 
   // --- Boards ---
+  // On card detail, include all boards (parent board is relevant for navigation back).
+  // On board page, exclude the current board.
   if (currentBoardId) {
+    const excludeId = isCardDetail ? null : currentBoardId
     const matchingBoards = q
-      ? boards.filter(b => b.id !== currentBoardId && b.title.toLowerCase().includes(q))
-      : boards.filter(b => b.id !== currentBoardId)
+      ? boards.filter(b => b.id !== excludeId && b.title.toLowerCase().includes(q))
+      : boards.filter(b => b.id !== excludeId)
     for (const b of matchingBoards.slice(0, 6)) {
       results.push({
         type: 'board', id: b.id, title: b.title,
