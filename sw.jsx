@@ -4458,6 +4458,7 @@ data: selector #board
 data: useViewTransition true
 data: elements <div id="board" class="board">...</div>`}</code></pre>
         <p>The <code>selector</code> identifies which DOM element to update. The <code>mode</code> controls how — <code>outer</code> replaces the element itself (including its tag), <code>inner</code> replaces only its children. The <code>elements</code> field contains the full HTML to morph in.</p>
+        <p>The selector can target anything: <code>html</code>, <code>body</code> for a full-page morph, or a specific container like <code>#app</code> or <code>#board</code>. This app uses <code>#app</code> for the initial load and <code>#board</code> for subsequent mutations — targeting the smallest container that contains the changing UI.</p>
         <p>On the server, a helper function handles the formatting:</p>
         <pre><code>{`function dsePatch(selector, jsx, mode = 'outer', opts) {
   return {
