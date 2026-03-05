@@ -3225,12 +3225,13 @@ function Shell({ path, children }) {
       <head>
         <meta charset="UTF-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-        <meta name="theme-color" content="#121017" />
+        <meta id="theme-color-meta" name="theme-color" content="#121017" />
         <meta name="mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
         <link rel="manifest" href={`${base()}manifest.json`} />
         <link rel="icon" href={`${base()}icon.svg`} type="image/svg+xml" />
         <link rel="apple-touch-icon" href={`${base()}icon-192.png`} />
+        <script>{raw(`(function(){var t=localStorage.getItem('theme')||'system';function apply(t){var dark=t==='dark'||(t!=='light'&&matchMedia('(prefers-color-scheme:dark)').matches);document.documentElement.dataset.theme=dark?'dark':'light';var m=document.getElementById('theme-color-meta');if(m)m.content=dark?'#121017':'#f4eefa'}apply(t);matchMedia('(prefers-color-scheme:dark)').addEventListener('change',function(){var t=localStorage.getItem('theme')||'system';if(t==='system')apply(t)});window.applyTheme=function(t){localStorage.setItem('theme',t);apply(t)}})()`)}</script>
         <link rel="stylesheet" href={`${base()}css/stellar.css`} />
         <title>Kanban</title>
         <style>{raw(CSS)}</style>
@@ -3700,9 +3701,10 @@ function EventsPage({ boards, boardFilter }) {
       <head>
         <meta charset="UTF-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-        <meta name="theme-color" content="#121017" />
+        <meta id="theme-color-meta" name="theme-color" content="#121017" />
         <link rel="manifest" href={`${base()}manifest.json`} />
         <link rel="icon" href={`${base()}icon.svg`} type="image/svg+xml" />
+        <script>{raw(`(function(){var t=localStorage.getItem('theme')||'system';var dark=t==='dark'||(t!=='light'&&matchMedia('(prefers-color-scheme:dark)').matches);document.documentElement.dataset.theme=dark?'dark':'light';var m=document.getElementById('theme-color-meta');if(m)m.content=dark?'#121017':'#f4eefa'})()`)}</script>
         <link rel="stylesheet" href={`${base()}css/stellar.css`} />
         <title>Event Log{boardFilter && boards ? ` — ${boards.find(b => b.id === boardFilter)?.title || ''}` : ''}</title>
         <style>{raw(EVENTS_CSS)}</style>
@@ -4669,6 +4671,12 @@ async function buildCommandMenuResults(query, context) {
       { type: 'action', id: 'a-events-all', title: 'Event log', subtitle: 'All boards', group: 'Actions', popupUrl: `${base()}events`, popupName: 'event-log' },
     )
   }
+  // Always available on every page
+  actions.push(
+    { type: 'action', id: 'a-theme', title: 'Change theme', subtitle: '\u263E', group: 'Actions',
+      jsAction: `fetch('${base()}command-menu/theme',{method:'POST',headers:{'X-Current-Theme':localStorage.getItem('theme')||'system'}})` },
+  )
+
   for (const action of actions) {
     if (!q || action.title.toLowerCase().includes(q)) results.push(action)
   }
@@ -4783,6 +4791,26 @@ app.post('/command-menu/search', async (c) => {
   const results = await buildCommandMenuResults(query, cm.context || '/')
   cm.query = body.query || ''
   cm.results = results
+  emitGlobalUI()
+  return c.body(null, 204)
+})
+
+// Command menu: theme picker sub-menu
+app.post('/command-menu/theme', async (c) => {
+  const current = c.req.header('X-Current-Theme') || 'system'
+  const THEMES = [
+    { id: 'system', title: 'System', subtitle: 'Follow OS preference', icon: '\uD83D\uDCBB' },
+    { id: 'light', title: 'Light', subtitle: '', icon: '\u2600\uFE0F' },
+    { id: 'dark', title: 'Dark', subtitle: '', icon: '\uD83C\uDF19' },
+  ]
+  const results = THEMES.map(t => ({
+    type: 'action', id: `t-${t.id}`,
+    title: `${t.icon}  ${t.title}${t.id === current ? '  \u2713' : ''}`,
+    subtitle: t.subtitle,
+    group: 'Theme',
+    jsAction: `applyTheme('${t.id}');fetch('${base()}command-menu/close',{method:'POST'})`,
+  }))
+  globalUIState.commandMenu = { query: '', results, context: globalUIState.commandMenu?.context || '/' }
   emitGlobalUI()
   return c.body(null, 204)
 })
