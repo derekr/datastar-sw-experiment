@@ -1376,7 +1376,7 @@ function CommandMenu({ query, results }) {
 
   let flatIdx = 0
   return (
-    <div id="command-menu" class="command-menu-backdrop" data-on:click={`@post('${base()}command-menu/close')`}>
+    <div id="command-menu" class="command-menu-backdrop" data-on:click={`if(window.revertTheme)revertTheme();@post('${base()}command-menu/close')`}>
       <div class="command-menu-panel" data-on:click__stop="void 0" data-signals={`{cmdIdx: 0, cmdCount: ${results.length}}`}>
         <form id="command-menu-form" data-on:submit__prevent="void 0">
           <div class="command-menu-input-wrap">
@@ -1390,10 +1390,10 @@ function CommandMenu({ query, results }) {
               autocomplete="off"
               data-on:input__debounce_150ms={`$cmdIdx = 0; @post('${base()}command-menu/search', {contentType: 'form'})`}
               data-on:keydown={`
-                if (event.key === 'ArrowDown') { event.preventDefault(); $cmdIdx = ($cmdIdx + 1) % $cmdCount; }
-                else if (event.key === 'ArrowUp') { event.preventDefault(); $cmdIdx = ($cmdIdx - 1 + $cmdCount) % $cmdCount; }
+                if (event.key === 'ArrowDown') { event.preventDefault(); $cmdIdx = ($cmdIdx + 1) % $cmdCount; requestAnimationFrame(function(){var a=document.querySelector('.command-menu-result--active');if(a&&a.dataset.themePreview&&window.previewTheme)previewTheme(a.dataset.themePreview)}); }
+                else if (event.key === 'ArrowUp') { event.preventDefault(); $cmdIdx = ($cmdIdx - 1 + $cmdCount) % $cmdCount; requestAnimationFrame(function(){var a=document.querySelector('.command-menu-result--active');if(a&&a.dataset.themePreview&&window.previewTheme)previewTheme(a.dataset.themePreview)}); }
                 else if (event.key === 'Enter') { event.preventDefault(); var a = document.querySelector('.command-menu-result--active'); if (a) a.click(); }
-                else if (event.key === 'Escape') { event.preventDefault(); @post('${base()}command-menu/close'); }
+                else if (event.key === 'Escape') { event.preventDefault(); if(window.revertTheme)revertTheme(); @post('${base()}command-menu/close'); }
               `}
               name="query"
             />
@@ -1413,6 +1413,7 @@ function CommandMenu({ query, results }) {
                           class="command-menu-result"
                           data-class={`{'command-menu-result--active': $cmdIdx === ${idx}}`}
                           data-on:click={clickHandler(r)}
+                          {...(r.themeId ? { 'data-theme-preview': r.themeId, 'data-on:mouseenter': `if(window.previewTheme)previewTheme('${r.themeId}')` } : {})}
                         >
                           <span class="command-menu-result-title">
                             <span class="command-menu-type-icon">{TYPE_ICONS[r.type] || ''}</span>
@@ -3231,7 +3232,7 @@ function Shell({ path, children }) {
         <link rel="manifest" href={`${base()}manifest.json`} />
         <link rel="icon" href={`${base()}icon.svg`} type="image/svg+xml" />
         <link rel="apple-touch-icon" href={`${base()}icon-192.png`} />
-        <script>{raw(`(function(){var t=localStorage.getItem('theme')||'system';function apply(t){var dark=t==='dark'||(t!=='light'&&matchMedia('(prefers-color-scheme:dark)').matches);document.documentElement.dataset.theme=dark?'dark':'light';var m=document.getElementById('theme-color-meta');if(m)m.content=dark?'#121017':'#f4eefa'}apply(t);matchMedia('(prefers-color-scheme:dark)').addEventListener('change',function(){var t=localStorage.getItem('theme')||'system';if(t==='system')apply(t)});window.applyTheme=function(t){localStorage.setItem('theme',t);apply(t)}})()`)}</script>
+        <script>{raw(`(function(){var t=localStorage.getItem('theme')||'system';function apply(t){var dark=t==='dark'||(t!=='light'&&matchMedia('(prefers-color-scheme:dark)').matches);document.documentElement.dataset.theme=dark?'dark':'light';var m=document.getElementById('theme-color-meta');if(m)m.content=dark?'#121017':'#f4eefa'}apply(t);matchMedia('(prefers-color-scheme:dark)').addEventListener('change',function(){var t=localStorage.getItem('theme')||'system';if(t==='system')apply(t)});window.applyTheme=function(t){localStorage.setItem('theme',t);apply(t)};window.previewTheme=function(t){apply(t)};window.revertTheme=function(){apply(localStorage.getItem('theme')||'system')}})()`)}</script>
         <link rel="stylesheet" href={`${base()}css/stellar.css`} />
         <title>Kanban</title>
         <style>{raw(CSS)}</style>
@@ -4808,6 +4809,7 @@ app.post('/command-menu/theme', async (c) => {
     title: `${t.icon}  ${t.title}${t.id === current ? '  \u2713' : ''}`,
     subtitle: t.subtitle,
     group: 'Theme',
+    themeId: t.id,
     jsAction: `applyTheme('${t.id}');fetch('${base()}command-menu/close',{method:'POST'})`,
   }))
   globalUIState.commandMenu = { query: '', results, context: globalUIState.commandMenu?.context || '/' }
