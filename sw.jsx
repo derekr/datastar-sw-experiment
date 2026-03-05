@@ -4718,7 +4718,7 @@ app.post('/cards/:cardId/sheet', async (c) => {
           <li><strong>No hydration mismatch</strong> — there's nothing to hydrate. The server renders, the client displays.</li>
           <li><strong>Simpler debugging</strong> — the UI is a pure function of server state. To reproduce a bug, check the server's state object — the UI follows deterministically.</li>
         </ul>
-        <p>The tradeoff is latency: every UI state change requires a round-trip. In this app, with a service worker as the server, that round-trip is sub-millisecond. With a remote server, you'd notice the delay on actions like opening a menu. For those cases, Datastar's optimistic UI attributes (<code>data-indicator</code>, <code>data-class</code>) can bridge the gap.</p>
+        <p>The tradeoff is latency: every UI state change requires a round-trip. With a fast backend, this is usually imperceptible. For slower connections, you can mask latency with CSS transitions and view transitions — the morph arrives before the eye notices the delay. Datastar also provides <code>data-indicator</code> for showing activity feedback while waiting for the server.</p>
       </section>
 
       <section class="docs-section">
