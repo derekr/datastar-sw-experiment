@@ -2635,6 +2635,14 @@ function Shell({ path, children }) {
             fetch('${base()}columns/' + d.columnId + '/sheet', { method: 'POST' });
           });
 
+          // Enter on focused card → open for editing
+          document.getElementById('app').addEventListener('kanban-card-open', function(e) {
+            var d = e.detail;
+            if (!d.cardId) return;
+            pendingFocus = { cardId: d.cardId };
+            fetch('${base()}cards/' + d.cardId + '/edit', { method: 'POST' });
+          });
+
           document.getElementById('app').addEventListener('kanban-column-drag-end', function(e) {
             var d = e.detail;
             if (!d.columnId) return;
@@ -3562,7 +3570,7 @@ async function buildCommandMenuResults(query, context) {
     } else if (isTimeTraveling) {
       // Time travel active — show exit
       actions.push(
-        { type: 'action', id: 'a-exit-tt', title: 'Exit time travel', subtitle: '', group: 'Actions', actionUrl: `${base()}boards/${currentBoardId}/time-travel-exit` },
+        { type: 'action', id: 'a-exit-tt', title: 'Exit time travel', subtitle: '', group: 'Actions', actionUrl: `${base()}boards/${currentBoardId}/time-travel/exit` },
       )
     } else {
       // Normal mode
@@ -3583,29 +3591,57 @@ async function buildCommandMenuResults(query, context) {
     if (!q || action.title.toLowerCase().includes(q)) results.push(action)
   }
 
-  if (currentBoardId) {
-    // --- Current board cards ---
-    if (q) {
-      const currentColIds = new Set(columns.filter(c => c.boardId === currentBoardId).map(c => c.id))
-      const matchingCards = cards
+  // --- Cards: unified section across all boards, current board first ---
+  if (q) {
+    const currentColIds = currentBoardId
+      ? new Set(columns.filter(c => c.boardId === currentBoardId).map(c => c.id))
+      : new Set()
+
+    // Current board cards first (if on a board)
+    if (currentBoardId) {
+      const localCards = cards
         .filter(c => currentColIds.has(c.columnId) && (
           c.title.toLowerCase().includes(q) || (c.description || '').toLowerCase().includes(q)
         ))
         .sort(cmpPosition)
         .slice(0, 12)
-      for (const card of matchingCards) {
+      for (const card of localCards) {
         const col = colMap[card.columnId]
         results.push({
           type: 'card', id: card.id, title: card.title,
           subtitle: col ? col.title : '',
-          group: 'This board',
+          group: 'Cards',
           boardId: currentBoardId, sameBoard: true,
           label: card.label || null,
         })
       }
     }
 
-    // --- Other boards matching query ---
+    // Cross-board cards (or all cards when on boards list)
+    const crossCards = cards
+      .filter(c => {
+        const col = colMap[c.columnId]
+        if (!col) return false
+        if (currentBoardId && currentColIds.has(c.columnId)) return false // already shown above
+        return c.title.toLowerCase().includes(q) || (c.description || '').toLowerCase().includes(q)
+      })
+      .sort(cmpPosition)
+      .slice(0, 10)
+    for (const card of crossCards) {
+      const col = colMap[card.columnId]
+      const board = col ? boardMap[col.boardId] : null
+      results.push({
+        type: 'card', id: card.id, title: card.title,
+        subtitle: `${board?.title || ''} / ${col?.title || ''}`,
+        group: 'Cards',
+        boardId: col?.boardId, sameBoard: false,
+        label: card.label || null,
+      })
+    }
+  }
+
+  // --- Boards ---
+  if (currentBoardId) {
     const matchingBoards = q
       ? boards.filter(b => b.id !== currentBoardId && b.title.toLowerCase().includes(q))
       : boards.filter(b => b.id !== currentBoardId)
@@ -3617,32 +3653,7 @@ async function buildCommandMenuResults(query, context) {
         href: `${base()}boards/${b.id}`,
       })
     }
-
-    // --- Cross-board cards ---
-    if (q) {
-      const currentColIds = new Set(columns.filter(c => c.boardId === currentBoardId).map(c => c.id))
-      const otherCards = cards
-        .filter(c => {
-          const col = colMap[c.columnId]
-          if (!col || currentColIds.has(c.columnId)) return false
-          return c.title.toLowerCase().includes(q) || (c.description || '').toLowerCase().includes(q)
-        })
-        .sort(cmpPosition)
-        .slice(0, 6)
-      for (const card of otherCards) {
-        const col = colMap[card.columnId]
-        const board = col ? boardMap[col.boardId] : null
-        results.push({
-          type: 'card', id: card.id, title: card.title,
-          subtitle: `${board?.title || ''} / ${col?.title || ''}`,
-          group: 'Other boards',
-          boardId: col?.boardId, sameBoard: false,
-          label: card.label || null,
-        })
-      }
-    }
   } else {
-    // --- On boards list: show boards ---
     const matchingBoards = q ? boards.filter(b => b.title.toLowerCase().includes(q)) : boards
     for (const b of matchingBoards.slice(0, 10)) {
       results.push({
@@ -3651,25 +3662,6 @@ async function buildCommandMenuResults(query, context) {
         group: 'Boards',
         href: `${base()}boards/${b.id}`,
       })
-    }
-
-    // --- Cards across all boards ---
-    if (q) {
-      const matchingCards = cards
-        .filter(c => c.title.toLowerCase().includes(q) || (c.description || '').toLowerCase().includes(q))
-        .sort(cmpPosition)
-        .slice(0, 10)
-      for (const card of matchingCards) {
-        const col = colMap[card.columnId]
-        const board = col ? boardMap[col.boardId] : null
-        results.push({
-          type: 'card', id: card.id, title: card.title,
-          subtitle: `${board?.title || ''} / ${col?.title || ''}`,
-          group: 'Cards',
-          boardId: col?.boardId, sameBoard: false,
-          label: card.label || null,
-        })
-      }
     }
   }
 
@@ -3726,7 +3718,7 @@ app.post('/command-menu/nav', async (c) => {
   return c.body(null, 204)
 })
 
-// Command menu: go to same-board card (close + highlight)
+// Command menu: go to same-board card (close + open for editing)
 app.post('/command-menu/go', async (c) => {
   const boardId = c.req.header('X-Board')
   const cardId = c.req.header('X-Card')
@@ -3734,7 +3726,8 @@ app.post('/command-menu/go', async (c) => {
   emitGlobalUI()
   if (boardId && cardId) {
     const ui = getUIState(boardId)
-    ui.highlightCard = cardId
+    ui.editingCard = cardId
+    ui.highlightCard = cardId // for scroll-into-view
     emitUI(boardId)
     setTimeout(() => {
       const u = getUIState(boardId)
@@ -3747,15 +3740,16 @@ app.post('/command-menu/go', async (c) => {
   return c.body(null, 204)
 })
 
-// Command menu: go to cross-board card (close + set highlight for post-navigation)
+// Command menu: go to cross-board card (close + set edit state for post-navigation)
 app.post('/command-menu/go-nav', async (c) => {
   const boardId = c.req.header('X-Board')
   const cardId = c.req.header('X-Card')
   globalUIState.commandMenu = null
   emitGlobalUI()
   if (boardId && cardId) {
-    // Pre-set highlight so when the board page loads, the card is highlighted
+    // Pre-set edit + highlight so when the board page loads, the card opens for editing
     const ui = getUIState(boardId)
+    ui.editingCard = cardId
     ui.highlightCard = cardId
     setTimeout(() => {
       const u = getUIState(boardId)

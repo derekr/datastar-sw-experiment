@@ -852,6 +852,17 @@
         }
       }
 
+      // Enter on a focused card (not selection mode) → open for editing
+      if (!selecting && e.key === 'Enter') {
+        var focused = document.activeElement
+        if (focused && boardEl.contains(focused) && focused.classList.contains('card')) {
+          e.preventDefault()
+          var cardId = focused.getAttribute('data-card-id')
+          if (cardId) emit('card-open', { cardId: cardId })
+          return
+        }
+      }
+
       var dir = directionFor(e.key)
       if (!dir) return
 
