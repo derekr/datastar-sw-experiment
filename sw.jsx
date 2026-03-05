@@ -4,7 +4,8 @@ import { streamSSE } from 'hono/streaming'
 import { openDB } from 'idb'
 import { raw } from 'hono/html'
 import { generateKeyBetween, generateNKeysBetween } from 'fractional-indexing'
-// eg-kanban.js is in public/ — served as a static file by Vite/GH Pages.
+// eg-kanban.js and stellar.css are bundled through Vite with content hashes.
+// Referenced via __KANBAN_JS__ and __STELLAR_CSS__ globals (injected by vite-plugin-sw.js).
 // Not imported here because Safari's SW fetch handler doesn't reliably
 // intercept <script src> subresource requests on SW-served pages.
 
@@ -3233,14 +3234,14 @@ function Shell({ path, children }) {
         <link rel="icon" href={`${base()}icon.svg`} type="image/svg+xml" />
         <link rel="apple-touch-icon" href={`${base()}icon-192.png`} />
         <script>{raw(`(function(){var t=localStorage.getItem('theme')||'system';function apply(t){var dark=t==='dark'||(t!=='light'&&matchMedia('(prefers-color-scheme:dark)').matches);document.documentElement.dataset.theme=dark?'dark':'light';var m=document.getElementById('theme-color-meta');if(m)m.content=dark?'#121017':'#f4eefa'}apply(t);matchMedia('(prefers-color-scheme:dark)').addEventListener('change',function(){var t=localStorage.getItem('theme')||'system';if(t==='system')apply(t)});window.applyTheme=function(t){localStorage.setItem('theme',t);apply(t)};window.previewTheme=function(t){apply(t)};window.revertTheme=function(){apply(localStorage.getItem('theme')||'system')}})()`)}</script>
-        <link rel="stylesheet" href={`${base()}css/stellar.css`} />
+        <link rel="stylesheet" href={`${base()}${__STELLAR_CSS__}`} />
         <title>Kanban</title>
         <style>{raw(CSS)}</style>
         <script
           type="module"
           src="https://cdn.jsdelivr.net/gh/starfederation/datastar@1.0.0-RC.8/bundles/datastar.js"
         ></script>
-        {isBoardPage && <script src={`${base()}eg-kanban.js`}></script>}
+        {isBoardPage && <script src={`${base()}${__KANBAN_JS__}`}></script>}
         {!isBoardPage && <script type="speculationrules">{raw(JSON.stringify({
           prefetch: [{
             source: 'document',
@@ -3706,7 +3707,7 @@ function EventsPage({ boards, boardFilter }) {
         <link rel="manifest" href={`${base()}manifest.json`} />
         <link rel="icon" href={`${base()}icon.svg`} type="image/svg+xml" />
         <script>{raw(`(function(){var t=localStorage.getItem('theme')||'system';var dark=t==='dark'||(t!=='light'&&matchMedia('(prefers-color-scheme:dark)').matches);document.documentElement.dataset.theme=dark?'dark':'light';var m=document.getElementById('theme-color-meta');if(m)m.content=dark?'#121017':'#f4eefa'})()`)}</script>
-        <link rel="stylesheet" href={`${base()}css/stellar.css`} />
+        <link rel="stylesheet" href={`${base()}${__STELLAR_CSS__}`} />
         <title>Event Log{boardFilter && boards ? ` — ${boards.find(b => b.id === boardFilter)?.title || ''}` : ''}</title>
         <style>{raw(EVENTS_CSS)}</style>
         <script
