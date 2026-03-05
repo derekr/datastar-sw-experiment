@@ -4207,10 +4207,11 @@ app.put('/cards/:cardId', async (c) => {
   if (events.length > 0) {
     await appendEventsWithUndo(events, boardId)
   }
-  // Clear editing state after save
+  // Clear editing state after save (label changes are accepted)
   if (boardId) {
     const ui = getUIState(boardId)
     ui.editingCard = null
+    ui.editingCardOriginalLabel = null
     // Data change already triggers SSE push if events were appended;
     // if no data changed but we still need to dismiss the form, emit UI
     if (events.length === 0) emitUI(boardId)
@@ -4507,19 +4508,42 @@ app.post('/cards/:cardId/edit', async (c) => {
   const boardId = await boardIdFromCard(cardId)
   if (!boardId) return c.body(null, 404)
   const ui = getUIState(boardId)
-  ui.editingCard = ui.editingCard === cardId ? null : cardId
+  const wasEditing = ui.editingCard === cardId
+  ui.editingCard = wasEditing ? null : cardId
+  // Store original label so cancel can revert label changes
+  if (!wasEditing) {
+    const db = await dbPromise
+    const card = await db.get('cards', cardId)
+    ui.editingCardOriginalLabel = card?.label || null
+  } else {
+    ui.editingCardOriginalLabel = null
+  }
   ui.activeCardSheet = null
   emitUI(boardId)
   return c.body(null, 204)
 })
 
-// Edit card: cancel
+// Edit card: cancel — revert label if it changed during editing
 app.post('/cards/:cardId/edit-cancel', async (c) => {
   const cardId = c.req.param('cardId')
   const boardId = await boardIdFromCard(cardId)
   if (!boardId) return c.body(null, 404)
   const ui = getUIState(boardId)
+
+  // Revert label to what it was when editing started
+  if (ui.editingCardOriginalLabel !== undefined) {
+    const db = await dbPromise
+    const card = await db.get('cards', cardId)
+    const currentLabel = card?.label || null
+    const originalLabel = ui.editingCardOriginalLabel
+    if (currentLabel !== originalLabel) {
+      const evt = createEvent('card.labelUpdated', { id: cardId, label: originalLabel })
+      await appendEventsWithUndo([evt], boardId)
+    }
+  }
+
   ui.editingCard = null
+  ui.editingCardOriginalLabel = null
   emitUI(boardId)
   return c.body(null, 204)
 })
