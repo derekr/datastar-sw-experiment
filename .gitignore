@@ -43,3 +43,10 @@ Thumbs.db
 temp/
 playground-temp/
 node_modules
+
+# Trace recordings
+*.json.gz
+
+# OpenCode
+.opencode/
+opencode.json
