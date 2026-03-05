@@ -4491,7 +4491,8 @@ self.addEventListener('fetch', (event) => {
   // Let static assets fall through to network/cache.
   // The SW only serves HTML (Hono routes) and SSE streams — all other file
   // types (JS, CSS, images, manifest) are served by the host (Vite / GH Pages).
-  if (/\.(js|css|png|svg|ico|woff2?|json|webmanifest)(\?.*)?$/.test(url.pathname)) return
+  // Exception: eg-kanban.js is served by the SW's Hono route (imported as raw string).
+  if (/\.(js|css|png|svg|ico|woff2?|json|webmanifest)(\?.*)?$/.test(url.pathname) && !url.pathname.endsWith('/eg-kanban.js')) return
   // Strip the SW scope prefix so Hono routes match regardless of base path.
   // e.g. /datastar-sw-experiment/boards/123 → /boards/123
   const scope = new URL(self.registration.scope).pathname
