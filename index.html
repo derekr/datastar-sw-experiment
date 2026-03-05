@@ -49,6 +49,16 @@
           setTimeout(reloadOnce, 3000);
         }
 
+        // Dev: force SW update check on every page load + when Vite rebuilds.
+        // Without this, the browser may serve a stale SW from a previous
+        // dev session for up to 24 hours. The SW has skipWaiting +
+        // clients.claim, so update → activate → controllerchange →
+        // reloadOnce handles the rest.
+        if (import.meta.hot) {
+          reg.update();
+          import.meta.hot.on('sw-updated', () => reg.update());
+        }
+
         // Board import: detect #import=<compressed> in URL hash
         const importMatch = location.hash.match(/^#import=(.+)$/);
         if (importMatch && navigator.serviceWorker.controller) {
