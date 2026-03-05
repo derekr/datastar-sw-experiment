@@ -2608,19 +2608,34 @@ input:not(#_), textarea:not(#_), select:not(#_) { font-size: max(1rem, 16px); }
   animation-duration: 200ms;
   animation-timing-function: cubic-bezier(0.2, 0, 0, 1);
 }
+/* Default: named groups morph, everything else instant */
 ::view-transition-old(*) { animation: none; opacity: 0; }
+::view-transition-new(*) { animation: none; }
+/* Root: subtle crossfade so the page doesn't pop during card transitions */
+::view-transition-old(root) { animation: vt-fade-out 250ms ease both; opacity: 1; }
+::view-transition-new(root) { animation: vt-fade-in 200ms ease 50ms both; }
 
-/* Card expand/collapse — the group handles position+size morph,
-   old/new both stay fully opaque so content crossfades naturally */
+/* Card expand/collapse — group morphs position+size,
+   old/new crossfade so content swaps smoothly during resize */
 ::view-transition-group(card-expand) {
-  animation-duration: 250ms;
+  animation-duration: 300ms;
   animation-timing-function: cubic-bezier(0.2, 0, 0, 1);
   overflow: hidden;
+  z-index: 100;
 }
-::view-transition-old(card-expand),
+::view-transition-old(card-expand) {
+  animation: vt-fade-out 200ms ease both;
+}
 ::view-transition-new(card-expand) {
-  animation: none;
-  mix-blend-mode: normal;
+  animation: vt-fade-in 200ms ease 100ms both;
+}
+@keyframes vt-fade-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+@keyframes vt-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 /* ── Card detail page ────────────────────────────── */
 
