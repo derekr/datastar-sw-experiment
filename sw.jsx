@@ -3932,6 +3932,8 @@ function DocsShell({ title, children }) {
         <link rel="manifest" href={`${base()}manifest.json`} />
         <link rel="icon" href={`${base()}icon.svg`} type="image/svg+xml" />
         <script>{raw(`(function(){var t=localStorage.getItem('theme')||'system';var dark=t==='dark'||(t!=='light'&&matchMedia('(prefers-color-scheme:dark)').matches);document.documentElement.dataset.theme=dark?'dark':'light';var m=document.getElementById('theme-color-meta');if(m)m.content=dark?'#121017':'#f4eefa'})()`)}</script>
+        <link rel="preload" href="https://fonts.bunny.net/inter/files/inter-latin-100-normal.woff2" as="font" type="font/woff2" crossorigin />
+        <link rel="preload" href="https://fonts.bunny.net/inter/files/inter-latin-900-normal.woff2" as="font" type="font/woff2" crossorigin />
         <link rel="stylesheet" href={`${base()}${__STELLAR_CSS__}`} />
         <title>{title ? `${title} — Docs` : 'Docs'}</title>
         <style>{raw(CSS)}{raw(DOCS_CSS)}</style>
@@ -3993,28 +3995,42 @@ function DocsSidebar({ currentSlug }) {
   )
 }
 
-function DocsLayout({ topic, commandMenu, children }) {
-  const sseUrl = topic ? `docs/${topic.slug}` : 'docs'
+// DocsPage: full HTML page wrapper (initial load only — NOT for SSE pushes)
+// #docs-app is just the morph target; the grid lives on DocsInner.
+function DocsPage({ title, sseUrl, children }) {
   return (
-    <DocsShell title={topic?.title}>
-      <div class="docs-layout" id="docs-app" data-init={`@get('${base()}${sseUrl}', { retry: 'always', retryMaxCount: 1000 })`}>
-        <DocsSidebar currentSlug={topic?.slug} />
-        <article class="docs-content">
-          {children}
-        </article>
-        {commandMenu && (
-          <CommandMenu query={commandMenu.query} results={commandMenu.results || []} />
-        )}
+    <DocsShell title={title}>
+      <div id="docs-app" data-init={`@get('${base()}${sseUrl}', { retry: 'always', retryMaxCount: 1000 })`}>
+        {children}
       </div>
     </DocsShell>
   )
 }
 
-function DocsIndex({ commandMenu }) {
+// DocsInner: SSE-pushable content wrapper (sidebar + article + command menu).
+// This is the grid container. One SSE connection per page handles both
+// global UI events (command menu/theme) and page-specific events (interactive
+// examples) — same pattern as board pages.
+function DocsInner({ topic, commandMenu, children }) {
+  return (
+    <div id="docs-page" class="docs-layout">
+      <DocsSidebar currentSlug={topic?.slug} />
+      <article class="docs-content" id="docs-content">
+        {children}
+      </article>
+      {commandMenu && (
+        <CommandMenu query={commandMenu.query} results={commandMenu.results || []} />
+      )}
+    </div>
+  )
+}
+
+// DocsIndexContent: index page article content (SSE-pushable)
+function DocsIndexContent({ commandMenu }) {
   const core = DOCS_TOPICS.filter(t => t.section === 'core')
   const bonus = DOCS_TOPICS.filter(t => t.section === 'bonus')
   return (
-    <DocsLayout commandMenu={commandMenu}>
+    <DocsInner commandMenu={commandMenu}>
       <div class="docs-hero">
         <h1>How This App Works</h1>
         <p class="docs-hero-sub">An interactive guide to building a local-first kanban board with <strong>Datastar</strong>, event sourcing, and a service worker.</p>
@@ -4045,16 +4061,17 @@ function DocsIndex({ commandMenu }) {
           ))}
         </div>
       </section>
-    </DocsLayout>
+    </DocsInner>
   )
 }
 
-function DocsTopicStub({ topic, commandMenu }) {
+// DocsTopicStubContent: topic stub article content (SSE-pushable)
+function DocsTopicStubContent({ topic, commandMenu }) {
   const idx = DOCS_TOPICS.findIndex(t => t.slug === topic.slug)
   const prev = idx > 0 ? DOCS_TOPICS[idx - 1] : null
   const next = idx < DOCS_TOPICS.length - 1 ? DOCS_TOPICS[idx + 1] : null
   return (
-    <DocsLayout topic={topic} commandMenu={commandMenu}>
+    <DocsInner topic={topic} commandMenu={commandMenu}>
       <h1>{topic.title}</h1>
       {topic.section === 'bonus' && <span class="docs-badge docs-badge--bonus">Bonus</span>}
       <div class="docs-stub">
@@ -4064,7 +4081,7 @@ function DocsTopicStub({ topic, commandMenu }) {
         {prev ? <a href={`${base()}docs/${prev.slug}`} class="docs-pager-link docs-pager-prev"><Icon name="lucide:arrow-left" /> {prev.title}</a> : <span />}
         {next ? <a href={`${base()}docs/${next.slug}`} class="docs-pager-link docs-pager-next">{next.title} <Icon name="lucide:arrow-right" /></a> : <span />}
       </nav>
-    </DocsLayout>
+    </DocsInner>
   )
 }
 
@@ -5373,17 +5390,17 @@ app.get('/export', async (c) => {
 app.get('/docs', (c) => {
   if (c.req.header('Datastar-Request') === 'true') {
     return streamSSE(c, async (stream) => {
-      const push = async (selector, mode) => {
-        await stream.writeSSE(dsePatch(selector, <DocsIndex commandMenu={globalUIState.commandMenu} />, mode))
+      // No initial push — page already has correct content from initial HTML.
+      // SSE stream stays open for state changes (command menu, future interactive examples).
+      const push = async () => {
+        await stream.writeSSE(dsePatch('#docs-page', <DocsIndexContent commandMenu={globalUIState.commandMenu} />, 'outer'))
       }
-      const handler = () => push('#docs-app', 'outer')
-      bus.addEventListener('global:ui', handler)
-      stream.onAbort(() => bus.removeEventListener('global:ui', handler))
-      await push('#docs-app', 'inner')
+      bus.addEventListener('global:ui', push)
+      stream.onAbort(() => bus.removeEventListener('global:ui', push))
       while (!stream.closed) { await stream.sleep(30000) }
     })
   }
-  return c.html('<!DOCTYPE html>' + (<DocsIndex commandMenu={globalUIState.commandMenu} />).toString())
+  return c.html('<!DOCTYPE html>' + (<DocsPage sseUrl="docs"><DocsIndexContent commandMenu={globalUIState.commandMenu} /></DocsPage>).toString())
 })
 
 app.get('/docs/:slug', (c) => {
@@ -5392,17 +5409,15 @@ app.get('/docs/:slug', (c) => {
   if (!topic) return c.notFound()
   if (c.req.header('Datastar-Request') === 'true') {
     return streamSSE(c, async (stream) => {
-      const push = async (selector, mode) => {
-        await stream.writeSSE(dsePatch(selector, <DocsTopicStub topic={topic} commandMenu={globalUIState.commandMenu} />, mode))
+      const push = async () => {
+        await stream.writeSSE(dsePatch('#docs-page', <DocsTopicStubContent topic={topic} commandMenu={globalUIState.commandMenu} />, 'outer'))
       }
-      const handler = () => push('#docs-app', 'outer')
-      bus.addEventListener('global:ui', handler)
-      stream.onAbort(() => bus.removeEventListener('global:ui', handler))
-      await push('#docs-app', 'inner')
+      bus.addEventListener('global:ui', push)
+      stream.onAbort(() => bus.removeEventListener('global:ui', push))
       while (!stream.closed) { await stream.sleep(30000) }
     })
   }
-  return c.html('<!DOCTYPE html>' + (<DocsTopicStub topic={topic} commandMenu={globalUIState.commandMenu} />).toString())
+  return c.html('<!DOCTYPE html>' + (<DocsPage title={topic.title} sseUrl={`docs/${topic.slug}`}><DocsTopicStubContent topic={topic} commandMenu={globalUIState.commandMenu} /></DocsPage>).toString())
 })
 
 // Debug: inspect event log (real-time)
