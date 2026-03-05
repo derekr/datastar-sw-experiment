@@ -107,6 +107,19 @@ const EVENT_VERSIONS = {
 // Allowed event types for import validation
 const ALLOWED_EVENT_TYPES = new Set(Object.keys(EVENT_VERSIONS))
 
+// --- Docs topics ---
+
+const DOCS_TOPICS = [
+  { slug: 'overview',       title: 'The Big Picture',                section: 'core' },
+  { slug: 'event-sourcing', title: 'Event Sourcing & CQRS',          section: 'core' },
+  { slug: 'sse-morphing',   title: 'SSE & Server-Sent Morphing',     section: 'core' },
+  { slug: 'signals',        title: 'Signals & Server-Owned UI State', section: 'core' },
+  { slug: 'service-worker', title: 'Service Worker as Server',       section: 'bonus' },
+  { slug: 'indexeddb',      title: 'IndexedDB: Keeping It Light',    section: 'bonus' },
+  { slug: 'fractional-indexing', title: 'Fractional Indexing',        section: 'bonus' },
+  { slug: 'local-first',    title: 'Local-First in the Browser',     section: 'bonus' },
+]
+
 const LABEL_COLORS = {
   red: 'var(--error-7)',
   orange: '#f97316',
@@ -1772,6 +1785,7 @@ function BoardsList({ boards, templates, commandMenu }) {
         </div>
       )}
       <div class="boards-toolbar">
+        <a href={`${base()}docs`} class="toolbar-btn"><Icon name="lucide:book-open" /> Docs</a>
         <button class="toolbar-btn" id="export-btn">Export</button>
         <button class="toolbar-btn" id="import-btn">Import</button>
         <input type="file" id="import-file" accept=".json" style="display:none" />
@@ -3474,6 +3488,254 @@ function Shell({ path, children }) {
   )
 }
 
+// --- Docs CSS ---
+
+const DOCS_CSS = `
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  background: var(--neutral-1);
+  color: var(--neutral-11);
+  min-height: 100dvh;
+  -webkit-text-size-adjust: 100%;
+}
+
+/* ── Layout ──────────────────────────────────────── */
+
+.docs-layout {
+  display: grid;
+  grid-template-columns: 260px 1fr;
+  min-height: 100dvh;
+}
+
+@media (max-width: 768px) {
+  .docs-layout { grid-template-columns: 1fr; }
+  .docs-sidebar { display: none; }
+}
+
+/* ── Sidebar ─────────────────────────────────────── */
+
+.docs-sidebar {
+  position: sticky;
+  top: 0;
+  height: 100dvh;
+  overflow-y: auto;
+  padding: var(--size-0) var(--size--1);
+  border-right: 1px solid var(--neutral-4);
+  background: var(--neutral-2);
+}
+
+.docs-sidebar-home {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--primary-7);
+  text-decoration: none;
+  font-size: var(--font-size--1);
+  margin-bottom: var(--size-1);
+}
+.docs-sidebar-home:hover { text-decoration: underline; }
+
+.docs-sidebar-section { margin-bottom: var(--size-0); }
+
+.docs-sidebar-heading {
+  font-size: var(--font-size--2);
+  font-weight: var(--font-weight-semi-bold);
+  color: var(--neutral-7);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 8px;
+}
+
+.docs-sidebar-list { list-style: none; }
+.docs-sidebar-list li { margin-bottom: 2px; }
+
+.docs-sidebar-link {
+  display: block;
+  padding: 6px 10px;
+  border-radius: var(--border-radius-0);
+  color: var(--neutral-9);
+  text-decoration: none;
+  font-size: var(--font-size--1);
+  transition: background var(--anim-duration-fast), color var(--anim-duration-fast);
+}
+.docs-sidebar-link:hover { background: var(--neutral-4); color: var(--neutral-11); }
+.docs-sidebar-link--active {
+  background: color-mix(in oklch, var(--primary-7) 15%, transparent);
+  color: var(--primary-9);
+  font-weight: var(--font-weight-medium);
+}
+
+/* ── Content ─────────────────────────────────────── */
+
+.docs-content {
+  max-width: 780px;
+  padding: var(--size-2) var(--size-1);
+  line-height: 1.7;
+}
+
+.docs-content h1 {
+  font-size: var(--font-size-3);
+  font-weight: var(--font-weight-bold);
+  margin-bottom: var(--size--2);
+  line-height: 1.2;
+}
+
+.docs-content h2 {
+  font-size: var(--font-size-1);
+  font-weight: var(--font-weight-semi-bold);
+  margin-top: var(--size-2);
+  margin-bottom: var(--size--1);
+}
+
+.docs-content h3 {
+  font-size: var(--font-size-0);
+  font-weight: var(--font-weight-semi-bold);
+  margin-top: var(--size-1);
+  margin-bottom: var(--size--2);
+}
+
+.docs-content p {
+  margin-bottom: var(--size--1);
+  color: var(--neutral-10);
+}
+
+.docs-content code {
+  background: var(--neutral-3);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 0.9em;
+}
+
+.docs-content pre {
+  background: var(--neutral-3);
+  border: 1px solid var(--neutral-4);
+  border-radius: var(--border-radius-1);
+  padding: var(--size--1);
+  overflow-x: auto;
+  margin-bottom: var(--size--1);
+  font-size: var(--font-size--2);
+  line-height: 1.6;
+}
+.docs-content pre code { background: none; padding: 0; }
+
+/* ── Hero (index page) ───────────────────────────── */
+
+.docs-hero {
+  margin-bottom: var(--size-2);
+  padding-bottom: var(--size-1);
+  border-bottom: 1px solid var(--neutral-4);
+}
+.docs-hero h1 {
+  font-size: var(--font-size-4);
+  margin-bottom: var(--size--1);
+}
+.docs-hero-sub {
+  font-size: var(--font-size-0);
+  color: var(--neutral-9);
+  max-width: 600px;
+}
+.docs-hero-note {
+  font-size: var(--font-size--1);
+  color: var(--neutral-7);
+  margin-top: var(--size--2);
+  font-style: italic;
+}
+
+/* ── TOC grid ────────────────────────────────────── */
+
+.docs-toc-section { margin-bottom: var(--size-2); }
+.docs-toc-section h2 {
+  font-size: var(--font-size-1);
+  font-weight: var(--font-weight-semi-bold);
+  margin-bottom: 6px;
+}
+.docs-toc-intro {
+  font-size: var(--font-size--1);
+  color: var(--neutral-8);
+  margin-bottom: var(--size-0);
+}
+
+.docs-toc-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: var(--size--1);
+}
+
+.docs-toc-card {
+  display: block;
+  padding: var(--size--1) var(--size-0);
+  background: var(--neutral-3);
+  border: 1px solid var(--neutral-4);
+  border-radius: var(--border-radius-1);
+  text-decoration: none;
+  color: var(--neutral-11);
+  transition: border-color var(--anim-duration-fast), background var(--anim-duration-fast);
+}
+.docs-toc-card:hover { border-color: var(--primary-7); background: var(--neutral-4); }
+.docs-toc-card h3 { font-size: var(--font-size--1); font-weight: var(--font-weight-medium); margin: 0; }
+.docs-toc-num {
+  display: inline-block;
+  font-size: var(--font-size--2);
+  font-weight: var(--font-weight-bold);
+  color: var(--primary-7);
+  margin-bottom: 4px;
+}
+
+.docs-toc-card--bonus {
+  border-style: dashed;
+  background: var(--neutral-2);
+}
+.docs-toc-card--bonus:hover { background: var(--neutral-3); }
+
+/* ── Badge ───────────────────────────────────────── */
+
+.docs-badge {
+  display: inline-block;
+  font-size: var(--font-size--2);
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-weight: var(--font-weight-medium);
+  margin-bottom: var(--size--1);
+}
+.docs-badge--bonus {
+  background: color-mix(in oklch, var(--secondary-7) 15%, transparent);
+  color: var(--secondary-9);
+}
+
+/* ── Stub ────────────────────────────────────────── */
+
+.docs-stub {
+  padding: var(--size-1);
+  background: var(--neutral-3);
+  border: 1px dashed var(--neutral-5);
+  border-radius: var(--border-radius-1);
+  color: var(--neutral-8);
+  margin: var(--size-0) 0;
+}
+
+/* ── Pager ────────────────────────────────────────── */
+
+.docs-pager {
+  display: flex;
+  justify-content: space-between;
+  margin-top: var(--size-2);
+  padding-top: var(--size-0);
+  border-top: 1px solid var(--neutral-4);
+}
+.docs-pager-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--primary-7);
+  text-decoration: none;
+  font-size: var(--font-size--1);
+}
+.docs-pager-link:hover { text-decoration: underline; }
+.docs-pager-next { margin-left: auto; }
+`
+
 // --- Events debug page ---
 
 const EVENTS_CSS = `
@@ -3655,6 +3917,132 @@ function EventList({ events, boardFilter, boards }) {
             </details>
           ))}
     </div>
+  )
+}
+
+// --- Docs pages ---
+
+function DocsShell({ title, children }) {
+  return (
+    <html lang="en">
+      <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+        <meta id="theme-color-meta" name="theme-color" content="#121017" />
+        <link rel="manifest" href={`${base()}manifest.json`} />
+        <link rel="icon" href={`${base()}icon.svg`} type="image/svg+xml" />
+        <script>{raw(`(function(){var t=localStorage.getItem('theme')||'system';var dark=t==='dark'||(t!=='light'&&matchMedia('(prefers-color-scheme:dark)').matches);document.documentElement.dataset.theme=dark?'dark':'light';var m=document.getElementById('theme-color-meta');if(m)m.content=dark?'#121017':'#f4eefa'})()`)}</script>
+        <link rel="stylesheet" href={`${base()}${__STELLAR_CSS__}`} />
+        <title>{title ? `${title} — Docs` : 'Docs'}</title>
+        <style>{raw(DOCS_CSS)}</style>
+        <script
+          type="module"
+          src="https://cdn.jsdelivr.net/gh/starfederation/datastar@1.0.0-RC.8/bundles/datastar.js"
+        ></script>
+        <script src="https://cdn.jsdelivr.net/npm/iconify-icon@2/dist/iconify-icon.min.js"></script>
+      </head>
+      <body>
+        {children}
+        <script>{raw(`navigator.serviceWorker?.addEventListener('controllerchange',function(){location.reload()})`)}</script>
+      </body>
+    </html>
+  )
+}
+
+function DocsSidebar({ currentSlug }) {
+  const core = DOCS_TOPICS.filter(t => t.section === 'core')
+  const bonus = DOCS_TOPICS.filter(t => t.section === 'bonus')
+  return (
+    <nav class="docs-sidebar" id="docs-sidebar">
+      <a href={base()} class="docs-sidebar-home"><Icon name="lucide:arrow-left" /> Back to app</a>
+      <div class="docs-sidebar-section">
+        <h3 class="docs-sidebar-heading">Core Concepts</h3>
+        <ul class="docs-sidebar-list">
+          {core.map(t => (
+            <li><a href={`${base()}docs/${t.slug}`} class={`docs-sidebar-link${currentSlug === t.slug ? ' docs-sidebar-link--active' : ''}`}>{t.title}</a></li>
+          ))}
+        </ul>
+      </div>
+      <div class="docs-sidebar-section">
+        <h3 class="docs-sidebar-heading">Bonus</h3>
+        <ul class="docs-sidebar-list">
+          {bonus.map(t => (
+            <li><a href={`${base()}docs/${t.slug}`} class={`docs-sidebar-link${currentSlug === t.slug ? ' docs-sidebar-link--active' : ''}`}>{t.title}</a></li>
+          ))}
+        </ul>
+      </div>
+    </nav>
+  )
+}
+
+function DocsLayout({ topic, children }) {
+  return (
+    <DocsShell title={topic?.title}>
+      <div class="docs-layout">
+        <DocsSidebar currentSlug={topic?.slug} />
+        <article class="docs-content">
+          {children}
+        </article>
+      </div>
+    </DocsShell>
+  )
+}
+
+function DocsIndex() {
+  const core = DOCS_TOPICS.filter(t => t.section === 'core')
+  const bonus = DOCS_TOPICS.filter(t => t.section === 'bonus')
+  return (
+    <DocsLayout>
+      <div class="docs-hero">
+        <h1>How This App Works</h1>
+        <p class="docs-hero-sub">An interactive guide to building a local-first kanban board with <strong>Datastar</strong>, event sourcing, and a service worker.</p>
+        <p class="docs-hero-note">This is a real app — the docs you're reading are served by the same service worker that runs the kanban board. Interactive examples are hooked up to the live event store.</p>
+      </div>
+
+      <section class="docs-toc-section">
+        <h2>Core Concepts</h2>
+        <p class="docs-toc-intro">These are the Datastar patterns that make this app tick.</p>
+        <div class="docs-toc-grid">
+          {core.map((t, i) => (
+            <a href={`${base()}docs/${t.slug}`} class="docs-toc-card">
+              <span class="docs-toc-num">{i + 1}</span>
+              <h3>{t.title}</h3>
+            </a>
+          ))}
+        </div>
+      </section>
+
+      <section class="docs-toc-section">
+        <h2>Bonus</h2>
+        <p class="docs-toc-intro">Implementation choices that aren't Datastar-specific — included because they're interesting or educational.</p>
+        <div class="docs-toc-grid">
+          {bonus.map(t => (
+            <a href={`${base()}docs/${t.slug}`} class="docs-toc-card docs-toc-card--bonus">
+              <h3>{t.title}</h3>
+            </a>
+          ))}
+        </div>
+      </section>
+    </DocsLayout>
+  )
+}
+
+function DocsTopicStub({ topic }) {
+  const idx = DOCS_TOPICS.findIndex(t => t.slug === topic.slug)
+  const prev = idx > 0 ? DOCS_TOPICS[idx - 1] : null
+  const next = idx < DOCS_TOPICS.length - 1 ? DOCS_TOPICS[idx + 1] : null
+  return (
+    <DocsLayout topic={topic}>
+      <h1>{topic.title}</h1>
+      {topic.section === 'bonus' && <span class="docs-badge docs-badge--bonus">Bonus</span>}
+      <div class="docs-stub">
+        <p>This section is coming soon.</p>
+      </div>
+      <nav class="docs-pager">
+        {prev ? <a href={`${base()}docs/${prev.slug}`} class="docs-pager-link docs-pager-prev"><Icon name="lucide:arrow-left" /> {prev.title}</a> : <span />}
+        {next ? <a href={`${base()}docs/${next.slug}`} class="docs-pager-link docs-pager-next">{next.title} <Icon name="lucide:arrow-right" /></a> : <span />}
+      </nav>
+    </DocsLayout>
   )
 }
 
@@ -4957,6 +5345,19 @@ app.get('/export', async (c) => {
 })
 
 
+
+// ── Docs ──────────────────────────────────────────────────────────────────────
+
+app.get('/docs', (c) => {
+  return c.html('<!DOCTYPE html>' + (<DocsIndex />).toString())
+})
+
+app.get('/docs/:slug', (c) => {
+  const slug = c.req.param('slug')
+  const topic = DOCS_TOPICS.find(t => t.slug === slug)
+  if (!topic) return c.notFound()
+  return c.html('<!DOCTYPE html>' + (<DocsTopicStub topic={topic} />).toString())
+})
 
 // Debug: inspect event log (real-time)
 app.get('/events', async (c) => {
