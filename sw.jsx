@@ -14,6 +14,15 @@ function Icon({ name, ...props }) {
   return <iconify-icon icon={name} inline {...props}></iconify-icon>
 }
 
+// Inline SVG icons for critical above-the-fold elements that must render instantly
+// without waiting for the Iconify JS to load + fetch icon data from CDN.
+function ArrowLeftIcon() {
+  return <svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24" style="vertical-align: -0.125em;"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m12 19l-7-7l7-7m7 7H5"></path></svg>
+}
+function ArrowRightIcon() {
+  return <svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24" style="vertical-align: -0.125em;"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14m-7-7l7 7l-7 7"></path></svg>
+}
+
 // Base path derived from SW scope — '/' locally, '/repo-name/' on GitHub Pages.
 // Lazy-init because self.registration isn't available at module parse time.
 let _base
@@ -1900,6 +1909,9 @@ function BoardsList({ boards, templates, commandMenu }) {
 const CSS = `
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
+/* Reserve space for iconify-icon — prevents layout shift while icon data loads from API */
+iconify-icon { display: inline-block; width: 1em; height: 1em; }
+
 /* Remove 300ms tap delay on all interactive elements */
 a, button, input, textarea, select, [data-on\\:click], [tabindex] {
   touch-action: manipulation;
@@ -3493,6 +3505,9 @@ function Shell({ path, children }) {
 const DOCS_CSS = `
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
+/* Reserve space for iconify-icon — prevents layout shift while icon data loads from API */
+iconify-icon { display: inline-block; width: 1em; height: 1em; }
+
 body {
   font-family: 'Inter', system-ui, -apple-system, sans-serif;
   background: var(--neutral-1);
@@ -3974,7 +3989,7 @@ function DocsSidebar({ currentSlug }) {
   const bonus = DOCS_TOPICS.filter(t => t.section === 'bonus')
   return (
     <nav class="docs-sidebar" id="docs-sidebar">
-      <a href={base()} class="docs-sidebar-home"><Icon name="lucide:arrow-left" /> Back to app</a>
+      <a href={base()} class="docs-sidebar-home"><ArrowLeftIcon /> Back to app</a>
       <div class="docs-sidebar-section">
         <h3 class="docs-sidebar-heading">Core Concepts</h3>
         <ul class="docs-sidebar-list">
@@ -4078,8 +4093,8 @@ function DocsTopicStubContent({ topic, commandMenu }) {
         <p>This section is coming soon.</p>
       </div>
       <nav class="docs-pager">
-        {prev ? <a href={`${base()}docs/${prev.slug}`} class="docs-pager-link docs-pager-prev"><Icon name="lucide:arrow-left" /> {prev.title}</a> : <span />}
-        {next ? <a href={`${base()}docs/${next.slug}`} class="docs-pager-link docs-pager-next">{next.title} <Icon name="lucide:arrow-right" /></a> : <span />}
+        {prev ? <a href={`${base()}docs/${prev.slug}`} class="docs-pager-link docs-pager-prev"><ArrowLeftIcon /> {prev.title}</a> : <span />}
+        {next ? <a href={`${base()}docs/${next.slug}`} class="docs-pager-link docs-pager-next">{next.title} <ArrowRightIcon /></a> : <span />}
       </nav>
     </DocsInner>
   )
