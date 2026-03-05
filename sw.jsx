@@ -234,6 +234,19 @@ async function boardIdForEvent(event, tx) {
   return null
 }
 
+// Annotate events with _boardId for filtering in the event log viewer.
+// Uses a read-only transaction to resolve card → column → board relationships.
+async function annotateEventsWithBoardId(events) {
+  const db = await dbPromise
+  const tx = db.transaction(ALL_STORES, 'readonly')
+  const annotated = []
+  for (const evt of events) {
+    const boardId = await boardIdForEvent(evt, tx)
+    annotated.push(boardId ? { ...evt, _boardId: boardId } : evt)
+  }
+  return annotated
+}
+
 // Append multiple events atomically in a single IDB transaction.
 // Dispatches scoped bus events after commit: board:<id>:changed for
 // board-specific events, boards:changed for board-level mutations.
@@ -1157,6 +1170,10 @@ function CommandMenu({ query, results }) {
     // Card: close menu + navigate to card detail route
     if (r.type === 'card') {
       return `fetch('${base()}command-menu/close',{method:'POST'}).then(function(){window.location.href='${base()}boards/${r.boardId}/cards/${r.id}'})`
+    }
+    // Popup: close menu + open in new window
+    if (r.popupUrl) {
+      return `fetch('${base()}command-menu/close',{method:'POST'}).then(function(){window.open('${r.popupUrl}','${r.popupName || '_blank'}','width=720,height=640')})`
     }
     // Board navigation
     if (r.href) {
@@ -3171,12 +3188,14 @@ summary::before {
 details[open] summary::before { transform: rotate(90deg); }
 
 .seq { color: #475569; min-width: 3ch; text-align: right; }
-.type { color: #818cf8; font-weight: 600; }
+.type { color: #818cf8; font-weight: 600; font-size: 0.8em; }
 .type--delete { color: #f87171; }
 .type--move { color: #fbbf24; }
 .type--create { color: #34d399; }
-.ts { color: #475569; margin-left: auto; font-size: 0.8em; }
-.synced { font-size: 0.75em; padding: 1px 6px; border-radius: 4px; }
+.type--update { color: #38bdf8; }
+.evt-summary { color: #cbd5e1; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ts { color: #475569; margin-left: auto; font-size: 0.8em; flex-shrink: 0; }
+.synced { font-size: 0.75em; padding: 1px 6px; border-radius: 4px; flex-shrink: 0; }
 .synced--no { background: #422006; color: #fbbf24; }
 .synced--yes { background: #052e16; color: #34d399; }
 
@@ -3207,46 +3226,100 @@ pre {
 .actions button:hover { background: #475569; }
 .actions button:disabled { opacity: 0.5; cursor: wait; }
 
+.board-filter {
+  background: #334155;
+  border: 1px solid #475569;
+  border-radius: 6px;
+  color: #e2e8f0;
+  padding: 6px 12px;
+  font-family: inherit;
+  font-size: 0.85em;
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%2394a3b8'%3E%3Cpath d='M2 4l4 4 4-4'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  padding-right: 28px;
+}
+.board-filter:hover { background-color: #475569; }
+
 .event-count {
   color: #64748b;
   font-size: 0.8em;
   padding: 4px 0 8px;
 }
+
+.events-scroll {
+  overflow-y: auto;
+  max-height: calc(100dvh - 120px);
+  scroll-behavior: smooth;
+}
 `
 
 function typeClass(type) {
-  if (type.includes('deleted')) return 'type type--delete'
-  if (type.includes('moved')) return 'type type--move'
-  if (type.includes('created')) return 'type type--create'
+  if (type.includes('deleted') || type.includes('Deleted')) return 'type type--delete'
+  if (type.includes('moved') || type.includes('Moved')) return 'type type--move'
+  if (type.includes('created') || type.includes('Created')) return 'type type--create'
+  if (type.includes('Updated') || type.includes('updated')) return 'type type--update'
   return 'type'
 }
 
-function EventList({ events }) {
-  const synced = events.filter(e => e.synced).length
-  const local = events.length - synced
+function summarizeEvent(evt) {
+  const { type, data } = evt
+  switch (type) {
+    case 'board.created': return `Created board "${data.title}"`
+    case 'board.titleUpdated': return `Renamed board to "${data.title}"`
+    case 'board.deleted': return `Deleted board`
+    case 'column.created': return `Created column "${data.title}"`
+    case 'column.deleted': return `Deleted column`
+    case 'column.moved': return `Moved column`
+    case 'card.created': return `Created card "${data.title}"`
+    case 'card.moved': return `Moved card`
+    case 'card.titleUpdated': return `Renamed card to "${data.title}"`
+    case 'card.descriptionUpdated': return data.description ? `Updated card description` : `Cleared card description`
+    case 'card.labelUpdated': return data.label ? `Set card label to ${data.label}` : `Removed card label`
+    case 'card.deleted': return `Deleted card`
+    default: return type
+  }
+}
+
+function EventList({ events, boardFilter, boards }) {
+  const filtered = boardFilter ? events.filter(e => {
+    // board events: data.id is the boardId
+    if (e.type.startsWith('board.')) return e.data.id === boardFilter
+    // column/card events: data.boardId if present
+    if (e.data.boardId) return e.data.boardId === boardFilter
+    // card events without boardId — need column lookup (resolved at render time via _boardId annotation)
+    if (e._boardId) return e._boardId === boardFilter
+    return false
+  }) : events
+  const synced = filtered.filter(e => e.synced).length
+  const local = filtered.length - synced
   return (
     <div id="event-list" class="event-list">
-      <p class="event-count">{events.length} events — {local} local{synced > 0 ? `, ${synced} synced` : ''}</p>
-      {events.length === 0
+      <p class="event-count">{filtered.length} events — {local} local{synced > 0 ? `, ${synced} synced` : ''}{boardFilter && boards ? ` — filtered to "${boards.find(b => b.id === boardFilter)?.title || boardFilter}"` : ''}</p>
+      {filtered.length === 0
         ? <p style="color: #475569; padding: 16px;">No events yet.</p>
-        : [...events].reverse().map(evt => (
-            <details>
+        : [...filtered].reverse().map(evt => (
+            <details id={`evt-${evt.seq}`}>
               <summary>
                 <span class="seq">{evt.seq}</span>
                 <span class={typeClass(evt.type)}>{evt.type}</span>
+                <span class="evt-summary">{summarizeEvent(evt)}</span>
                 <span class={evt.synced ? 'synced synced--yes' : 'synced synced--no'}>
                   {evt.synced ? 'synced' : 'local'}
                 </span>
                 <span class="ts">{new Date(evt.ts).toLocaleTimeString()}</span>
               </summary>
-              <pre>{raw(JSON.stringify(evt, null, 2).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '&#10;'))}</pre>
+              <pre>{raw(JSON.stringify(evt, (k, v) => k === '_boardId' ? undefined : v, 2).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '&#10;'))}</pre>
             </details>
           ))}
     </div>
   )
 }
 
-function EventsPage() {
+function EventsPage({ boards, boardFilter }) {
   return (
     <html lang="en">
       <head>
@@ -3255,7 +3328,7 @@ function EventsPage() {
         <meta name="theme-color" content="#0f172a" />
         <link rel="manifest" href={`${base()}manifest.json`} />
         <link rel="icon" href={`${base()}icon.svg`} type="image/svg+xml" />
-        <title>Event Log</title>
+        <title>Event Log{boardFilter && boards ? ` — ${boards.find(b => b.id === boardFilter)?.title || ''}` : ''}</title>
         <style>{raw(EVENTS_CSS)}</style>
         <script
           type="module"
@@ -3263,8 +3336,14 @@ function EventsPage() {
         ></script>
       </head>
       <body>
-        <h1>Event Log <span><a href={base()}>← board</a></span></h1>
+        <h1>Event Log <span><a href={base()}>← boards</a></span></h1>
         <div class="actions">
+          <select class="board-filter" onchange={`window.location.href='${base()}events' + (this.value ? '?board=' + this.value : '')`}>
+            <option value="">All boards</option>
+            {boards.map(b => (
+              <option value={b.id} selected={b.id === boardFilter}>{b.title}</option>
+            ))}
+          </select>
           <button
             data-indicator="_rebuilding"
             data-on:click={`@post('${base()}rebuild')`}
@@ -3274,9 +3353,9 @@ function EventsPage() {
             <span data-show="$_rebuilding">Rebuilding...</span>
           </button>
         </div>
-        <div
+        <div class="events-scroll"
           id="events-app"
-           data-init={`@get('${base()}events', { retry: 'always', retryMaxCount: 1000 })`}
+          data-init={`@get('${base()}events${boardFilter ? `?board=${boardFilter}` : ''}', { retry: 'always', retryMaxCount: 1000 })`}
         >
           <p style="color: #475569;">Connecting...</p>
         </div>
@@ -3285,6 +3364,13 @@ function EventsPage() {
             navigator.serviceWorker.addEventListener('controllerchange', () => {
               window.location.reload();
             });
+          }
+          // Auto-scroll to top when new events arrive (list is reverse-chronological)
+          const target = document.getElementById('events-app');
+          if (target) {
+            new MutationObserver(() => {
+              target.scrollTop = 0;
+            }).observe(target, { childList: true, subtree: true });
           }
         `)}</script>
       </body>
@@ -4019,6 +4105,8 @@ async function buildCommandMenuResults(query, context) {
     // Card detail page — show navigation actions only
     actions.push(
       { type: 'action', id: 'a-back-board', title: 'Back to board', subtitle: '', group: 'Actions', href: `${base()}boards/${currentBoardId}` },
+      { type: 'action', id: 'a-events', title: 'Event log', subtitle: 'This board', group: 'Actions', popupUrl: `${base()}events?board=${currentBoardId}`, popupName: 'event-log' },
+      { type: 'action', id: 'a-events-all', title: 'Event log (all)', subtitle: 'All boards', group: 'Actions', popupUrl: `${base()}events`, popupName: 'event-log' },
       { type: 'action', id: 'a-boards', title: 'All boards', subtitle: '', group: 'Actions', href: base() },
     )
   } else if (currentBoardId) {
@@ -4060,7 +4148,14 @@ async function buildCommandMenuResults(query, context) {
     // Always available regardless of mode
     actions.push(
       { type: 'action', id: 'a-help', title: ui.showHelp ? 'Close help' : 'Keyboard shortcuts', subtitle: '?', group: 'Actions', actionUrl: `${base()}boards/${currentBoardId}/help` },
+      { type: 'action', id: 'a-events', title: 'Event log', subtitle: 'This board', group: 'Actions', popupUrl: `${base()}events?board=${currentBoardId}`, popupName: 'event-log' },
+      { type: 'action', id: 'a-events-all', title: 'Event log (all)', subtitle: 'All boards', group: 'Actions', popupUrl: `${base()}events`, popupName: 'event-log' },
       { type: 'action', id: 'a-boards', title: 'All boards', subtitle: '', group: 'Actions', href: base() },
+    )
+  } else {
+    // Boards list page — no board context
+    actions.push(
+      { type: 'action', id: 'a-events-all', title: 'Event log', subtitle: 'All boards', group: 'Actions', popupUrl: `${base()}events`, popupName: 'event-log' },
     )
   }
   for (const action of actions) {
@@ -4344,13 +4439,17 @@ app.post('/import', async (c) => {
 // Debug: inspect event log (real-time)
 app.get('/events', async (c) => {
   await initialize()
+  const boardFilter = c.req.query('board') || ''
+  const db = await dbPromise
+  const boards = (await db.getAll('boards')).sort((a, b) => (a.title || '').localeCompare(b.title || ''))
 
   if (c.req.header('Datastar-Request') === 'true') {
     return streamSSE(c, async (stream) => {
       const pushEventList = async (selector, mode) => {
         const db = await dbPromise
-        const allEvents = await db.getAll('events')
-        await stream.writeSSE(dsePatch(selector, <EventList events={allEvents} />, mode))
+        const allEvents = await annotateEventsWithBoardId(await db.getAll('events'))
+        const boards = await db.getAll('boards')
+        await stream.writeSSE(dsePatch(selector, <EventList events={allEvents} boardFilter={boardFilter} boards={boards} />, mode))
       }
 
       const handler = () => pushEventList('#event-list', 'outer')
@@ -4366,7 +4465,7 @@ app.get('/events', async (c) => {
     })
   }
 
-  return c.html('<!DOCTYPE html>' + (<EventsPage />).toString())
+  return c.html('<!DOCTYPE html>' + (<EventsPage boards={boards} boardFilter={boardFilter} />).toString())
 })
 
 // Debug: event log JSON API
