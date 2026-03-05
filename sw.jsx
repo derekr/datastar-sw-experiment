@@ -3734,6 +3734,77 @@ body {
 }
 .docs-pager-link:hover { text-decoration: underline; }
 .docs-pager-next { margin-left: auto; }
+
+/* ── Command menu overlay ────────────────────────── */
+
+.docs-cmd-backdrop {
+  position: fixed; inset: 0;
+  background: color-mix(in oklch, var(--neutral-1) 70%, transparent);
+  z-index: var(--zindex-dialog);
+  display: flex; justify-content: center; padding-top: 20vh;
+  backdrop-filter: blur(4px);
+}
+.docs-cmd-panel {
+  background: var(--neutral-3);
+  border: 1px solid var(--neutral-5);
+  border-radius: var(--border-radius-2);
+  width: min(480px, 90vw);
+  max-height: 60vh;
+  display: flex; flex-direction: column;
+  box-shadow: var(--shadow-5);
+  overflow: hidden;
+  align-self: flex-start;
+}
+.docs-cmd-input {
+  background: none; border: none; border-bottom: 1px solid var(--neutral-5);
+  padding: var(--size--1) var(--size-0);
+  font-size: var(--font-size-0);
+  color: var(--neutral-11);
+  outline: none;
+  width: 100%;
+}
+.docs-cmd-input::placeholder { color: var(--neutral-7); }
+.docs-cmd-list {
+  list-style: none; overflow-y: auto; padding: 6px;
+}
+.docs-cmd-group {
+  font-size: var(--font-size--2);
+  color: var(--neutral-7);
+  font-weight: var(--font-weight-semi-bold);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 8px 10px 4px;
+}
+.docs-cmd-item {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 10px;
+  border-radius: var(--border-radius-0);
+  color: var(--neutral-10);
+  text-decoration: none;
+  font-size: var(--font-size--1);
+  cursor: pointer;
+  transition: background var(--anim-duration-fast);
+}
+.docs-cmd-item:hover,
+.docs-cmd-item--active { background: var(--neutral-5); color: var(--neutral-11); }
+.docs-cmd-item-badge {
+  font-size: var(--font-size--2);
+  color: var(--neutral-7);
+  margin-left: auto;
+}
+.docs-cmd-hint {
+  font-size: var(--font-size--2);
+  color: var(--neutral-7);
+  text-align: center;
+  padding: 6px;
+  border-top: 1px solid var(--neutral-5);
+}
+.docs-cmd-hint kbd {
+  background: var(--neutral-5);
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: var(--font-size--2);
+}
 `
 
 // --- Events debug page ---
@@ -3943,7 +4014,62 @@ function DocsShell({ title, children }) {
       </head>
       <body>
         {children}
-        <script>{raw(`navigator.serviceWorker?.addEventListener('controllerchange',function(){location.reload()})`)}</script>
+        <script>{raw(`navigator.serviceWorker?.addEventListener('controllerchange',function(){location.reload()});
+(function(){
+  var B='${base()}';
+  var items=[
+    {label:'Back to app',href:B,group:'App'},
+    ${DOCS_TOPICS.map(t => `{label:${JSON.stringify(t.title)},href:B+'docs/${t.slug}',group:${JSON.stringify(t.section === 'core' ? 'Core Concepts' : 'Bonus')}}`).join(',\n    ')}
+  ];
+  var el=null,idx=0,filtered=items;
+  function render(){
+    if(el)el.remove();
+    var bg=document.createElement('div');bg.className='docs-cmd-backdrop';bg.id='docs-cmd';
+    var q=filtered===items?'':'';
+    bg.innerHTML='<div class="docs-cmd-panel">'
+      +'<input class="docs-cmd-input" placeholder="Navigate..." autofocus />'
+      +'<ul class="docs-cmd-list">'+buildList()+'</ul>'
+      +'<div class="docs-cmd-hint"><kbd>\u2191\u2193</kbd> navigate <kbd>\u21B5</kbd> go <kbd>esc</kbd> close</div>'
+      +'</div>';
+    bg.addEventListener('click',function(e){if(e.target===bg)close()});
+    document.body.appendChild(bg);
+    el=bg;
+    var inp=bg.querySelector('.docs-cmd-input');
+    inp.addEventListener('input',function(){
+      var v=this.value.toLowerCase();
+      filtered=v?items.filter(function(i){return i.label.toLowerCase().includes(v)}):items;
+      idx=0;update();
+    });
+    inp.addEventListener('keydown',function(e){
+      if(e.key==='ArrowDown'){e.preventDefault();idx=(idx+1)%filtered.length;update()}
+      else if(e.key==='ArrowUp'){e.preventDefault();idx=(idx-1+filtered.length)%filtered.length;update()}
+      else if(e.key==='Enter'){e.preventDefault();if(filtered[idx])window.location.href=filtered[idx].href}
+      else if(e.key==='Escape'){e.preventDefault();close()}
+    });
+    inp.focus();
+  }
+  function buildList(){
+    var h='',g='';
+    for(var i=0;i<filtered.length;i++){
+      var it=filtered[i];
+      if(it.group!==g){g=it.group;h+='<li class="docs-cmd-group">'+g+'</li>'}
+      var cur=window.location.pathname===it.href||window.location.pathname===it.href.replace(/\\/$/,'');
+      h+='<li><a class="docs-cmd-item'+(i===idx?' docs-cmd-item--active':'')+'" href="'+it.href+'">'
+        +it.label+(cur?'<span class="docs-cmd-item-badge">current</span>':'')+'</a></li>';
+    }
+    return h;
+  }
+  function update(){
+    if(!el)return;
+    el.querySelector('.docs-cmd-list').innerHTML=buildList();
+  }
+  function close(){if(el){el.remove();el=null;idx=0;filtered=items}}
+  document.addEventListener('keydown',function(e){
+    if((e.metaKey||e.ctrlKey)&&e.key==='k'){e.preventDefault();el?close():render()}
+    else if(e.key==='Escape'&&el){e.preventDefault();close()}
+  });
+})();
+`)}</script>
       </body>
     </html>
   )
