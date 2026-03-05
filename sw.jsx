@@ -3734,77 +3734,6 @@ body {
 }
 .docs-pager-link:hover { text-decoration: underline; }
 .docs-pager-next { margin-left: auto; }
-
-/* ── Command menu overlay ────────────────────────── */
-
-.docs-cmd-backdrop {
-  position: fixed; inset: 0;
-  background: color-mix(in oklch, var(--neutral-1) 70%, transparent);
-  z-index: var(--zindex-dialog);
-  display: flex; justify-content: center; padding-top: 20vh;
-  backdrop-filter: blur(4px);
-}
-.docs-cmd-panel {
-  background: var(--neutral-3);
-  border: 1px solid var(--neutral-5);
-  border-radius: var(--border-radius-2);
-  width: min(480px, 90vw);
-  max-height: 60vh;
-  display: flex; flex-direction: column;
-  box-shadow: var(--shadow-5);
-  overflow: hidden;
-  align-self: flex-start;
-}
-.docs-cmd-input {
-  background: none; border: none; border-bottom: 1px solid var(--neutral-5);
-  padding: var(--size--1) var(--size-0);
-  font-size: var(--font-size-0);
-  color: var(--neutral-11);
-  outline: none;
-  width: 100%;
-}
-.docs-cmd-input::placeholder { color: var(--neutral-7); }
-.docs-cmd-list {
-  list-style: none; overflow-y: auto; padding: 6px;
-}
-.docs-cmd-group {
-  font-size: var(--font-size--2);
-  color: var(--neutral-7);
-  font-weight: var(--font-weight-semi-bold);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  padding: 8px 10px 4px;
-}
-.docs-cmd-item {
-  display: flex; align-items: center; gap: 8px;
-  padding: 8px 10px;
-  border-radius: var(--border-radius-0);
-  color: var(--neutral-10);
-  text-decoration: none;
-  font-size: var(--font-size--1);
-  cursor: pointer;
-  transition: background var(--anim-duration-fast);
-}
-.docs-cmd-item:hover,
-.docs-cmd-item--active { background: var(--neutral-5); color: var(--neutral-11); }
-.docs-cmd-item-badge {
-  font-size: var(--font-size--2);
-  color: var(--neutral-7);
-  margin-left: auto;
-}
-.docs-cmd-hint {
-  font-size: var(--font-size--2);
-  color: var(--neutral-7);
-  text-align: center;
-  padding: 6px;
-  border-top: 1px solid var(--neutral-5);
-}
-.docs-cmd-hint kbd {
-  background: var(--neutral-5);
-  padding: 1px 5px;
-  border-radius: 3px;
-  font-size: var(--font-size--2);
-}
 `
 
 // --- Events debug page ---
@@ -4005,7 +3934,7 @@ function DocsShell({ title, children }) {
         <script>{raw(`(function(){var t=localStorage.getItem('theme')||'system';var dark=t==='dark'||(t!=='light'&&matchMedia('(prefers-color-scheme:dark)').matches);document.documentElement.dataset.theme=dark?'dark':'light';var m=document.getElementById('theme-color-meta');if(m)m.content=dark?'#121017':'#f4eefa'})()`)}</script>
         <link rel="stylesheet" href={`${base()}${__STELLAR_CSS__}`} />
         <title>{title ? `${title} — Docs` : 'Docs'}</title>
-        <style>{raw(DOCS_CSS)}</style>
+        <style>{raw(CSS)}{raw(DOCS_CSS)}</style>
         <script
           type="module"
           src="https://cdn.jsdelivr.net/gh/starfederation/datastar@1.0.0-RC.8/bundles/datastar.js"
@@ -4014,61 +3943,24 @@ function DocsShell({ title, children }) {
       </head>
       <body>
         {children}
-        <script>{raw(`navigator.serviceWorker?.addEventListener('controllerchange',function(){location.reload()});
-(function(){
-  var B='${base()}';
-  var items=[
-    {label:'Back to app',href:B,group:'App'},
-    ${DOCS_TOPICS.map(t => `{label:${JSON.stringify(t.title)},href:B+'docs/${t.slug}',group:${JSON.stringify(t.section === 'core' ? 'Core Concepts' : 'Bonus')}}`).join(',\n    ')}
-  ];
-  var el=null,idx=0,filtered=items;
-  function render(){
-    if(el)el.remove();
-    var bg=document.createElement('div');bg.className='docs-cmd-backdrop';bg.id='docs-cmd';
-    var q=filtered===items?'':'';
-    bg.innerHTML='<div class="docs-cmd-panel">'
-      +'<input class="docs-cmd-input" placeholder="Navigate..." autofocus />'
-      +'<ul class="docs-cmd-list">'+buildList()+'</ul>'
-      +'<div class="docs-cmd-hint"><kbd>\u2191\u2193</kbd> navigate <kbd>\u21B5</kbd> go <kbd>esc</kbd> close</div>'
-      +'</div>';
-    bg.addEventListener('click',function(e){if(e.target===bg)close()});
-    document.body.appendChild(bg);
-    el=bg;
-    var inp=bg.querySelector('.docs-cmd-input');
-    inp.addEventListener('input',function(){
-      var v=this.value.toLowerCase();
-      filtered=v?items.filter(function(i){return i.label.toLowerCase().includes(v)}):items;
-      idx=0;update();
-    });
-    inp.addEventListener('keydown',function(e){
-      if(e.key==='ArrowDown'){e.preventDefault();idx=(idx+1)%filtered.length;update()}
-      else if(e.key==='ArrowUp'){e.preventDefault();idx=(idx-1+filtered.length)%filtered.length;update()}
-      else if(e.key==='Enter'){e.preventDefault();if(filtered[idx])window.location.href=filtered[idx].href}
-      else if(e.key==='Escape'){e.preventDefault();close()}
-    });
-    inp.focus();
+        <script>{raw(`
+navigator.serviceWorker?.addEventListener('controllerchange',function(){location.reload()});
+document.addEventListener('keydown',function(e){
+  if((e.metaKey||e.ctrlKey)&&e.key==='k'){
+    e.preventDefault();
+    fetch('${base()}command-menu/open',{method:'POST',headers:{'X-Context':location.pathname}});
   }
-  function buildList(){
-    var h='',g='';
-    for(var i=0;i<filtered.length;i++){
-      var it=filtered[i];
-      if(it.group!==g){g=it.group;h+='<li class="docs-cmd-group">'+g+'</li>'}
-      var cur=window.location.pathname===it.href||window.location.pathname===it.href.replace(/\\/$/,'');
-      h+='<li><a class="docs-cmd-item'+(i===idx?' docs-cmd-item--active':'')+'" href="'+it.href+'">'
-        +it.label+(cur?'<span class="docs-cmd-item-badge">current</span>':'')+'</a></li>';
-    }
-    return h;
+  if(e.key==='Escape'&&document.getElementById('command-menu')){
+    e.preventDefault();
+    fetch('${base()}command-menu/close',{method:'POST'});
   }
-  function update(){
-    if(!el)return;
-    el.querySelector('.docs-cmd-list').innerHTML=buildList();
-  }
-  function close(){if(el){el.remove();el=null;idx=0;filtered=items}}
-  document.addEventListener('keydown',function(e){
-    if((e.metaKey||e.ctrlKey)&&e.key==='k'){e.preventDefault();el?close():render()}
-    else if(e.key==='Escape'&&el){e.preventDefault();close()}
-  });
-})();
+});
+var _lastCmd=false;
+new MutationObserver(function(){
+  var cm=document.getElementById('command-menu');
+  if(cm&&!_lastCmd){var inp=document.getElementById('command-menu-input');if(inp)inp.focus()}
+  _lastCmd=!!cm;
+}).observe(document.body,{childList:true,subtree:true});
 `)}</script>
       </body>
     </html>
@@ -4101,24 +3993,28 @@ function DocsSidebar({ currentSlug }) {
   )
 }
 
-function DocsLayout({ topic, children }) {
+function DocsLayout({ topic, commandMenu, children }) {
+  const sseUrl = topic ? `docs/${topic.slug}` : 'docs'
   return (
     <DocsShell title={topic?.title}>
-      <div class="docs-layout">
+      <div class="docs-layout" id="docs-app" data-init={`@get('${base()}${sseUrl}', { retry: 'always', retryMaxCount: 1000 })`}>
         <DocsSidebar currentSlug={topic?.slug} />
         <article class="docs-content">
           {children}
         </article>
+        {commandMenu && (
+          <CommandMenu query={commandMenu.query} results={commandMenu.results || []} />
+        )}
       </div>
     </DocsShell>
   )
 }
 
-function DocsIndex() {
+function DocsIndex({ commandMenu }) {
   const core = DOCS_TOPICS.filter(t => t.section === 'core')
   const bonus = DOCS_TOPICS.filter(t => t.section === 'bonus')
   return (
-    <DocsLayout>
+    <DocsLayout commandMenu={commandMenu}>
       <div class="docs-hero">
         <h1>How This App Works</h1>
         <p class="docs-hero-sub">An interactive guide to building a local-first kanban board with <strong>Datastar</strong>, event sourcing, and a service worker.</p>
@@ -4153,12 +4049,12 @@ function DocsIndex() {
   )
 }
 
-function DocsTopicStub({ topic }) {
+function DocsTopicStub({ topic, commandMenu }) {
   const idx = DOCS_TOPICS.findIndex(t => t.slug === topic.slug)
   const prev = idx > 0 ? DOCS_TOPICS[idx - 1] : null
   const next = idx < DOCS_TOPICS.length - 1 ? DOCS_TOPICS[idx + 1] : null
   return (
-    <DocsLayout topic={topic}>
+    <DocsLayout topic={topic} commandMenu={commandMenu}>
       <h1>{topic.title}</h1>
       {topic.section === 'bonus' && <span class="docs-badge docs-badge--bonus">Bonus</span>}
       <div class="docs-stub">
@@ -5475,14 +5371,38 @@ app.get('/export', async (c) => {
 // ── Docs ──────────────────────────────────────────────────────────────────────
 
 app.get('/docs', (c) => {
-  return c.html('<!DOCTYPE html>' + (<DocsIndex />).toString())
+  if (c.req.header('Datastar-Request') === 'true') {
+    return streamSSE(c, async (stream) => {
+      const push = async (selector, mode) => {
+        await stream.writeSSE(dsePatch(selector, <DocsIndex commandMenu={globalUIState.commandMenu} />, mode))
+      }
+      const handler = () => push('#docs-app', 'outer')
+      bus.addEventListener('global:ui', handler)
+      stream.onAbort(() => bus.removeEventListener('global:ui', handler))
+      await push('#docs-app', 'inner')
+      while (!stream.closed) { await stream.sleep(30000) }
+    })
+  }
+  return c.html('<!DOCTYPE html>' + (<DocsIndex commandMenu={globalUIState.commandMenu} />).toString())
 })
 
 app.get('/docs/:slug', (c) => {
   const slug = c.req.param('slug')
   const topic = DOCS_TOPICS.find(t => t.slug === slug)
   if (!topic) return c.notFound()
-  return c.html('<!DOCTYPE html>' + (<DocsTopicStub topic={topic} />).toString())
+  if (c.req.header('Datastar-Request') === 'true') {
+    return streamSSE(c, async (stream) => {
+      const push = async (selector, mode) => {
+        await stream.writeSSE(dsePatch(selector, <DocsTopicStub topic={topic} commandMenu={globalUIState.commandMenu} />, mode))
+      }
+      const handler = () => push('#docs-app', 'outer')
+      bus.addEventListener('global:ui', handler)
+      stream.onAbort(() => bus.removeEventListener('global:ui', handler))
+      await push('#docs-app', 'inner')
+      while (!stream.closed) { await stream.sleep(30000) }
+    })
+  }
+  return c.html('<!DOCTYPE html>' + (<DocsTopicStub topic={topic} commandMenu={globalUIState.commandMenu} />).toString())
 })
 
 // Debug: inspect event log (real-time)
