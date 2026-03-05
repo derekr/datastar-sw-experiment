@@ -120,7 +120,7 @@ const ALLOWED_EVENT_TYPES = new Set(Object.keys(EVENT_VERSIONS))
 
 const DOCS_TOPICS = [
   { slug: 'event-sourcing', title: 'Event Sourcing & CQRS',          section: 'core' },
-  { slug: 'sse-morphing',   title: 'SSE & Server-Sent Morphing',     section: 'core' },
+  { slug: 'fat-morphing',   title: 'Fat Morphing',                    section: 'core' },
   { slug: 'signals',        title: 'Signals & Server-Owned UI State', section: 'core' },
   { slug: 'hypermedia',     title: 'Hypermedia — The Missing Pattern', section: 'core' },
   { slug: 'mpa-navigations', title: 'MPA Navigations',                section: 'bonus' },
@@ -4429,13 +4429,13 @@ return c.body(null, 204)`}</code></pre>
   )
 }
 
-function DocsSseMorphingContent({ topic, commandMenu }) {
+function DocsFatMorphingContent({ topic, commandMenu }) {
   return (
     <DocsInner topic={topic} commandMenu={commandMenu}>
       <h1>{topic.title}</h1>
 
       <section class="docs-section">
-        <p>When the server handles a mutation, it doesn't return JSON for the client to render. Instead, it renders the entire updated UI as HTML and <strong>pushes it to every connected client over SSE</strong>. Datastar receives the HTML and uses Idiomorph to efficiently patch the live DOM.</p>
+        <p>When the server handles a mutation, it renders the <strong>entire updated UI</strong> as HTML and <strong>pushes it to every connected client over SSE</strong>. Datastar receives the HTML and uses Idiomorph to efficiently patch the live DOM. This is called <strong>fat morphing</strong> — every push contains the full UI, not a diff.</p>
         <p>This is the core Datastar pattern: the server decides what the UI looks like, and the client just displays it.</p>
       </section>
 
@@ -4514,6 +4514,17 @@ await stream.writeSSE(dsePatch('#board', <Board ... />, 'outer'))`}</code></pre>
   return c.html('<!DOCTYPE html>' + (<Shell><Board ... /></Shell>).toString())
 })`}</code></pre>
         <p>On initial load, the browser gets a complete HTML document with pre-rendered content. Datastar then opens the SSE connection, and the first SSE push morphs <code>#app inner</code> with fresh content. Subsequent pushes target the inner component (<code>#board outer</code>) as state changes.</p>
+      </section>
+
+      <section class="docs-section">
+        <h2>Alternative: app shell + lazy UI</h2>
+        <p>This app pre-renders full HTML on every request. But there's another pattern that's common with Datastar:</p>
+        <ul class="docs-list">
+          <li><strong>Initial load</strong> returns a lightweight app shell — just the layout, nav, and empty states.</li>
+          <li><strong>First SSE push</strong> brings in the actual UI — the board, cards, data.</li>
+        </ul>
+        <p>This works well when the initial render is expensive or when you want faster time-to-first-byte. The app shell is cached (HTTP or Service Worker), and the dynamic content loads over SSE. The tradeoff is a brief "loading" state before the SSE connects and pushes the first morph.</p>
+        <p>Both patterns work. Pre-render everything (like this app) gives you instant visual completeness. App shell + SSE gives you faster initial response and cleaner separation between shell and content.</p>
       </section>
 
       <section class="docs-section">
@@ -5003,8 +5014,8 @@ function DocsTopicContent({ topic, commandMenu }) {
   switch (topic.slug) {
     case 'event-sourcing':
       return <DocsEventSourcingContent topic={topic} commandMenu={commandMenu} />
-    case 'sse-morphing':
-      return <DocsSseMorphingContent topic={topic} commandMenu={commandMenu} />
+    case 'fat-morphing':
+      return <DocsFatMorphingContent topic={topic} commandMenu={commandMenu} />
     case 'signals':
       return <DocsSignalsContent topic={topic} commandMenu={commandMenu} />
     case 'hypermedia':
