@@ -76,9 +76,16 @@ The browser kills idle SWs after ~30s. The event bus, `boardUIState`, actor ID c
 
 `app.fetch()` receives the full URL but Hono routes are defined as `/`, `/boards/:id`, etc. The fetch handler strips `base()` before passing to Hono. Static assets (`.js`, `.css`, `.png`, etc.) are passed through to the network via a regex check.
 
-### Don't serve static JS from Hono routes
+### Static assets go in `public/`, not Hono routes
 
-Safari's SW fetch handler does not reliably intercept `<script src>` subresource requests on SW-served pages. If you serve a JS file via a Hono route (e.g. `app.get('/foo.js', ...)`), Safari may skip the SW entirely and request it from the network, where it 404s on GitHub Pages. Put JS files in `public/` instead so they're real static files served by Vite and GH Pages directly. This is why `eg-kanban.js` lives in `public/` — it was originally served via a Hono route with a raw import, which worked in Chrome but 404'd in Safari.
+The SW only serves dynamic HTML (Hono routes) and SSE streams. All static assets (JS, CSS, images) belong in `public/` and are served directly by Vite / GitHub Pages. The SW fetch handler passes them through to the network via a regex check on file extension.
+
+Why not serve them from Hono:
+- **Safari quirk**: Safari's SW fetch handler doesn't reliably intercept `<script src>` subresource requests on SW-served pages — the request skips the SW and goes straight to the network, where it 404s on GH Pages.
+- **Caching**: Static files in `public/` get proper HTTP caching. Vite hashes entry files (`main-[hash].js`) for infinite cache + automatic busting. Hono routes would need manual cache headers.
+- **Offline**: Browser HTTP cache handles offline for static assets. No need for the SW to manage a cache API.
+
+`eg-kanban.js` lives in `public/` for this reason — it was originally served via a Hono route with a raw import, which worked in Chrome but 404'd in Safari.
 
 ## Idiomorph / Datastar SSE gotchas
 
