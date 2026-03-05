@@ -3551,6 +3551,8 @@ body {
 }
 .docs-sidebar-home:hover { text-decoration: underline; }
 
+.docs-sidebar-overview { margin-bottom: var(--size--1); }
+
 .docs-sidebar-section { margin-bottom: var(--size-0); }
 
 .docs-sidebar-heading {
@@ -4049,6 +4051,7 @@ function DocsSidebar({ currentSlug }) {
   return (
     <nav class="docs-sidebar" id="docs-sidebar">
       <a href={base()} class="docs-sidebar-home"><ArrowLeftIcon /> Back to app</a>
+      <a href={`${base()}docs`} class={`docs-sidebar-link docs-sidebar-overview${!currentSlug ? ' docs-sidebar-link--active' : ''}`}>Overview</a>
       <div class="docs-sidebar-section">
         <h3 class="docs-sidebar-heading">Core Concepts</h3>
         <ul class="docs-sidebar-list">
@@ -4107,20 +4110,20 @@ function DocsIndexContent({ commandMenu }) {
     <DocsInner commandMenu={commandMenu}>
       <div class="docs-hero">
         <h1>How This App Works</h1>
-        <p class="docs-hero-sub">An interactive guide to building a local-first kanban board with <strong>Datastar</strong>, event sourcing, and a service worker.</p>
-        <p class="docs-hero-note">This is a real app — the docs you're reading are served by the same service worker that runs the kanban board. Interactive examples are hooked up to the live event store.</p>
+        <p class="docs-hero-sub">An interactive guide to building a server-driven kanban board with <strong>Datastar</strong> and event sourcing.</p>
+        <p class="docs-hero-note">This is a real app — the docs you're reading are served by the same server that runs the kanban board. Interactive examples are hooked up to the live event store.</p>
       </div>
 
       <section class="docs-section" id="big-picture">
         <h2>The Big Picture</h2>
-        <p>Most web apps split work between a client-side framework and a remote server. This app does something different: the <strong>service worker is the server</strong>. It runs Hono for routing, renders JSX into HTML, persists data to IndexedDB, and pushes UI updates over SSE. The browser tab is just a thin shell that receives HTML and morphs it into the DOM.</p>
+        <p>Most web apps split work between a client-side framework and a server. This app keeps things simple: the <strong>server owns all state and all rendering</strong>. It runs Hono for routing, renders JSX into HTML, persists data to a database, and pushes UI updates over SSE. The browser tab is just a thin shell that receives HTML and morphs it into the DOM.</p>
 
         <p>Every user action follows the same loop:</p>
 
         <ol class="docs-flow-list" id="flow-steps">
-          <li><strong>Client sends an action</strong> — a button click, form submit, or drag-drop fires a <code>POST</code>/<code>PUT</code>/<code>DELETE</code> to a Hono route inside the service worker.</li>
-          <li><strong>SW writes event(s)</strong> — the route handler appends one or more immutable events to the IndexedDB event log. Events are facts: <code>card.created</code>, <code>column.moved</code>, <code>card.labelChanged</code>.</li>
-          <li><strong>SW rebuilds projection</strong> — the event is applied to an in-memory projection (the current state of boards, columns, cards). This is the "read model" in CQRS terms.</li>
+          <li><strong>Client sends an action</strong> — a button click, form submit, or drag-drop fires a <code>POST</code>/<code>PUT</code>/<code>DELETE</code> to a Hono route on the server.</li>
+          <li><strong>Server writes event(s)</strong> — the route handler appends one or more immutable events to the event log. Events are facts: <code>card.created</code>, <code>column.moved</code>, <code>card.labelChanged</code>.</li>
+          <li><strong>Server rebuilds projection</strong> — the event is applied to an in-memory projection (the current state of boards, columns, cards). This is the "read model" in CQRS terms.</li>
           <li><strong>Bus notifies SSE streams</strong> — the route emits a topic on the in-memory event bus (<code>board:&lt;id&gt;</code>). Every open SSE connection subscribed to that topic wakes up.</li>
           <li><strong>SSE pushes a full HTML morph</strong> — each SSE handler reads the latest projection, renders the entire board as JSX, and sends it as a Datastar <code>datastar-patch-elements</code> event.</li>
           <li><strong>Datastar morphs the DOM</strong> — the client-side Datastar library receives the HTML and uses Idiomorph to efficiently diff and patch the live DOM. No virtual DOM, no hydration — just HTML in, DOM out.</li>
@@ -4132,8 +4135,8 @@ function DocsIndexContent({ commandMenu }) {
         <p>This pattern — sometimes called "HTML-over-the-wire" — trades client-side complexity for server-side simplicity. The server already knows the full state, so it can render exactly the right HTML. The client doesn't need to reconcile, cache, or invalidate anything. It just displays what it receives.</p>
         <p>Datastar makes this practical: it manages SSE connections, applies morphs via Idiomorph (which preserves focus, scroll position, and CSS transitions), and provides a lightweight signal system for the small amount of client-to-server communication that forms need.</p>
 
-        <h3>What makes this app unusual</h3>
-        <p>The "server" is a service worker — it runs in the browser, not on a remote machine. That means zero network latency, offline-by-default, and the entire app is self-contained in a single tab. But the Datastar patterns are identical to what you'd use with a real backend. The SW is an implementation detail; the architecture is the lesson.</p>
+        <h3>A note on this demo</h3>
+        <p>In this app, the "server" happens to be a service worker running in your browser — which means you can use it offline and everything stays on your device. But the Datastar patterns are identical to what you'd use with Go, Python, Node, or any other backend. The service worker is an implementation detail; the architecture is the lesson.</p>
       </section>
 
       <section class="docs-toc-section" id="topics">
