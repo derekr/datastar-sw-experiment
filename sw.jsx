@@ -3771,6 +3771,31 @@ body {
   margin-bottom: 2px;
 }
 
+/* ── Table ───────────────────────────────────────── */
+
+.docs-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--font-size--1);
+  margin: var(--size-0) 0;
+}
+.docs-table th,
+.docs-table td {
+  padding: 6px var(--size--1);
+  border-bottom: 1px solid var(--neutral-4);
+  text-align: left;
+}
+.docs-table th {
+  font-weight: var(--font-weight-semi-bold);
+  color: var(--neutral-9);
+  font-size: var(--font-size--2);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.docs-table td code {
+  font-size: var(--font-size--2);
+}
+
 /* ── TOC grid ────────────────────────────────────── */
 
 .docs-toc-section { margin-bottom: var(--size-2); }
@@ -4523,6 +4548,200 @@ bus.addEventListener('board:\${boardId}:changed', async () => {
   )
 }
 
+function DocsSignalsContent({ topic, commandMenu }) {
+  return (
+    <DocsInner topic={topic} commandMenu={commandMenu}>
+      <h1>{topic.title}</h1>
+
+      <section class="docs-section">
+        <p>Most web frameworks put UI state on the client. An "edit mode" flag lives in <code>useState</code>, a selection set lives in a Zustand store, a modal's open/closed state is a reactive signal. The server returns data; the client decides how to display it.</p>
+        <p>This app flips that. <strong>The server tracks all UI state</strong> — which card is being edited, which action sheet is open, which cards are selected — and pushes fully-rendered HTML with the right UI baked in. The client has almost no state of its own.</p>
+      </section>
+
+      <section class="docs-section">
+        <h2>Server-owned UI state</h2>
+        <p>Every board has an in-memory state object on the server that tracks ephemeral UI mode:</p>
+        <pre><code>{`const boardUIState = new Map()  // Map<boardId, UIState>
+
+function getUIState(boardId) {
+  if (!boardUIState.has(boardId)) {
+    boardUIState.set(boardId, {
+      activeCardSheet: null,      // which card's action sheet is open
+      activeColSheet: null,       // which column's action sheet is open
+      selectionMode: false,       // multi-select active?
+      selectedCards: new Set(),   // which cards are selected
+      editingCard: null,          // which card has inline edit form
+      editingBoardTitle: false,   // is the board title being renamed?
+      showHelp: false,            // keyboard shortcut overlay visible?
+      highlightCard: null,        // card to scroll-into-view + pulse
+    })
+  }
+  return boardUIState.get(boardId)
+}`}</code></pre>
+        <p>This state is never persisted — it lives only in memory and resets when the server restarts. It's purely about <em>what the UI looks like right now</em>, not about data. Two separate bus topics reflect this split:</p>
+        <ul class="docs-list">
+          <li><code>board:&lt;id&gt;:changed</code> — data was mutated (events written to the database). Pushes morph <strong>with</strong> view transitions.</li>
+          <li><code>board:&lt;id&gt;:ui</code> — only UI state changed (nothing persisted). Pushes morph <strong>without</strong> view transitions.</li>
+        </ul>
+        <p>Both fire the same full morph push. The rendering code doesn't distinguish between them — it reads the current projection <em>plus</em> the current UI state and renders the whole board.</p>
+      </section>
+
+      <section class="docs-section">
+        <h2>Worked example: editing a card</h2>
+        <p>Here's what happens when a user clicks the edit pencil on a card — no client-side state involved:</p>
+        <ol class="docs-flow-list">
+          <li><strong>Client sends intent</strong> — the edit button fires <code>@post('/cards/&lt;id&gt;/edit')</code>. No payload, no signal. Just "I want to edit this card."</li>
+          <li><strong>Server updates UI state</strong> — the route handler toggles <code>editingCard</code> in the board's UI state and fires <code>emitUI(boardId)</code>:
+            <pre><code>{`app.post('/cards/:cardId/edit', async (c) => {
+  const ui = getUIState(boardId)
+  ui.editingCard = ui.editingCard === cardId ? null : cardId
+  ui.activeCardSheet = null     // close any open action sheet
+  emitUI(boardId)               // notify SSE streams
+  return c.body(null, 204)      // no response body needed
+})`}</code></pre>
+          </li>
+          <li><strong>SSE push fires</strong> — the stream handler reads fresh state from IndexedDB and the current <code>uiState</code>, then renders the full board.</li>
+          <li><strong>Component checks UI state</strong> — the Card component reads <code>uiState.editingCard</code> to decide what to render:
+            <pre><code>{`function Card({ card, uiState, ... }) {
+  const isEditing = uiState?.editingCard === card.id
+
+  return (
+    <div id={\`card-\${card.id}\`} class="card">
+      {isEditing ? (
+        <form data-on:submit__prevent={\`@put('/cards/\${card.id}', {contentType: 'form'})\`}>
+          <input name="title" value={card.title} />
+          <textarea name="description">{card.description}</textarea>
+          <button type="submit">Save</button>
+          <button type="button" data-on:click={\`@post('/cards/\${card.id}/edit-cancel')\`}>Cancel</button>
+        </form>
+      ) : (
+        <span class="card-title">{card.title}</span>
+      )}
+    </div>
+  )
+}`}</code></pre>
+          </li>
+          <li><strong>Datastar morphs the DOM</strong> — Idiomorph patches the card element, replacing the title span with the edit form. Focus moves to the input.</li>
+        </ol>
+        <p>The edit form <em>appears</em> because the server rendered it into the morph, not because the client toggled a flag. When the user saves or cancels, another POST clears <code>editingCard</code>, and the next morph removes the form.</p>
+      </section>
+
+      <section class="docs-section">
+        <h2>Where signals are actually used</h2>
+        <p>Datastar's signal system is powerful, but this app uses it sparingly. In the entire codebase there are exactly <strong>two</strong> <code>data-signals</code> declarations:</p>
+        <ol class="docs-flow-list">
+          <li><strong>Command menu navigation</strong> — tracks the highlighted result index for arrow-key navigation:
+            <pre><code>{`<div data-signals="{cmdIdx: 0, cmdCount: \${results.length}}">
+  <!-- Arrow up/down adjust $cmdIdx -->
+  <!-- Enter activates the item at $cmdIdx -->
+</div>`}</code></pre>
+          </li>
+          <li><strong>Selection bar dropdown</strong> — a boolean to show/hide the column picker when batch-moving cards:
+            <pre><code>{`<div data-signals="{showColumnPicker: false}">
+  <button data-on:click="$showColumnPicker = !$showColumnPicker">Move to...</button>
+  <div data-show="$showColumnPicker">
+    <!-- column list -->
+  </div>
+</div>`}</code></pre>
+          </li>
+        </ol>
+        <p>Both are trivial UI toggles — an index counter and a boolean. Every meaningful UI state change (editing, selecting, opening sheets, time-traveling) goes through the server.</p>
+      </section>
+
+      <section class="docs-section">
+        <h2>Forms: the one place clients send data</h2>
+        <p>When the client needs to send actual data to the server — a card title, a description, a search query — it uses standard HTML forms with Datastar's <code>{`{contentType: 'form'}`}</code> option:</p>
+        <pre><code>{`<!-- New card form -->
+<form data-on:submit__prevent__viewtransition=
+  {\`@post('/columns/\${col.id}/cards', {contentType: 'form'}); evt.target.reset()\`}>
+  <input name="title" placeholder="Add a card" autocomplete="off" />
+</form>
+
+<!-- Board rename form -->
+<form data-on:submit__prevent={\`@put('/boards/\${board.id}', {contentType: 'form'})\`}>
+  <input name="title" type="text" value={board.title} />
+</form>`}</code></pre>
+        <p>This sends a standard URL-encoded form body — <code>title=My+Card</code> — which the server parses with <code>c.req.parseBody()</code>. No signals, no two-way binding, no controlled inputs. The form is native HTML; Datastar just intercepts the submit.</p>
+        <p>There are only <strong>seven</strong> form submissions in the entire app: create card, edit card (inline), edit card (detail page), create column, create board, rename board, and command menu search.</p>
+      </section>
+
+      <section class="docs-section">
+        <h2>Selection mode: a server-side set</h2>
+        <p>Multi-card selection is the most complex UI state in the app, and it's entirely server-owned. The selection set (<code>selectedCards</code>) is a <code>Set</code> in <code>boardUIState</code>, not a client-side signal:</p>
+        <pre><code>{`// Enter selection mode
+app.post('/boards/:boardId/select-mode', async (c) => {
+  const ui = getUIState(boardId)
+  ui.selectionMode = true
+  ui.selectedCards.clear()
+  emitUI(boardId)
+  return c.body(null, 204)
+})
+
+// Toggle a card's selection
+app.post('/cards/:cardId/toggle-select', async (c) => {
+  const ui = getUIState(boardId)
+  if (ui.selectedCards.has(cardId)) {
+    ui.selectedCards.delete(cardId)
+  } else {
+    ui.selectedCards.add(cardId)
+  }
+  emitUI(boardId)
+  return c.body(null, 204)
+})`}</code></pre>
+        <p>Each toggle sends a POST, the server updates the set, and a morph pushes the full board with checkboxes and selection highlights baked in. The client never knows which cards are selected — it just renders what the server sends.</p>
+      </section>
+
+      <section class="docs-section">
+        <h2>Action sheets: touch interaction, server state</h2>
+        <p>On touch devices, tapping a card opens an action sheet with move, label, edit, and delete options. The client side dispatches a custom event, which triggers a fetch:</p>
+        <pre><code>{`// In the page's inline script:
+document.getElementById('app').addEventListener('kanban-card-tap', (e) => {
+  fetch('/cards/' + e.detail.cardId + '/sheet', { method: 'POST' })
+})
+
+// On the server:
+app.post('/cards/:cardId/sheet', async (c) => {
+  const ui = getUIState(boardId)
+  ui.activeCardSheet = ui.activeCardSheet === cardId ? null : cardId
+  emitUI(boardId)
+  return c.body(null, 204)
+})`}</code></pre>
+        <p>The action sheet component is rendered by the server only when <code>activeCardSheet</code> matches a card ID. Every button in the sheet — move to column, change label, edit, delete — is another <code>@post()</code> or <code>@delete()</code> to a server route. The sheet dismisses because the server sets <code>activeCardSheet = null</code> and pushes a morph without it.</p>
+      </section>
+
+      <section class="docs-section">
+        <h2>Why this works</h2>
+        <p>The "fewer signals is better" principle sounds limiting, but it eliminates entire categories of bugs:</p>
+        <ul class="docs-list">
+          <li><strong>No stale UI</strong> — there's no client state that can drift from the server. Every morph is ground truth.</li>
+          <li><strong>No state synchronization</strong> — two tabs don't need to coordinate. Each gets independent morphs from the same server state.</li>
+          <li><strong>No hydration mismatch</strong> — there's nothing to hydrate. The server renders, the client displays.</li>
+          <li><strong>Simpler debugging</strong> — the UI is a pure function of server state. To reproduce a bug, check the server's state object — the UI follows deterministically.</li>
+        </ul>
+        <p>The tradeoff is latency: every UI state change requires a round-trip. In this app, with a service worker as the server, that round-trip is sub-millisecond. With a remote server, you'd notice the delay on actions like opening a menu. For those cases, Datastar's optimistic UI attributes (<code>data-indicator</code>, <code>data-class</code>) can bridge the gap.</p>
+      </section>
+
+      <section class="docs-section">
+        <h2>The pattern, summarized</h2>
+        <table class="docs-table">
+          <thead>
+            <tr><th>Mechanism</th><th>Count</th><th>Purpose</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>data-signals</code></td><td>2</td><td>Arrow-key index, dropdown toggle</td></tr>
+            <tr><td><code>@post</code> / <code>@delete</code> (no body)</td><td>~35</td><td>UI state changes: edit, select, sheets, help</td></tr>
+            <tr><td>Form submissions</td><td>7</td><td>Card/column/board creation, editing, search</td></tr>
+            <tr><td><code>boardUIState</code> keys</td><td>10+</td><td>All ephemeral UI mode state</td></tr>
+          </tbody>
+        </table>
+        <p>Signals exist for the rare cases where client-only behavior makes sense (keyboard navigation, dropdown toggles). Everything else is a POST to the server. The server decides what the UI looks like and pushes it.</p>
+      </section>
+
+      <DocsPager topic={topic} />
+    </DocsInner>
+  )
+}
+
 // Topic content lookup — returns topic-specific component or falls back to stub
 function DocsTopicContent({ topic, commandMenu }) {
   switch (topic.slug) {
@@ -4530,6 +4749,8 @@ function DocsTopicContent({ topic, commandMenu }) {
       return <DocsEventSourcingContent topic={topic} commandMenu={commandMenu} />
     case 'sse-morphing':
       return <DocsSseMorphingContent topic={topic} commandMenu={commandMenu} />
+    case 'signals':
+      return <DocsSignalsContent topic={topic} commandMenu={commandMenu} />
     default:
       return <DocsTopicStubContent topic={topic} commandMenu={commandMenu} />
   }

@@ -1,11 +1,11 @@
 ---
 # datastar_sw-wizi
 title: 'Docs: Signals & Server-Owned UI State'
-status: todo
+status: in-progress
 type: task
 priority: high
 created_at: 2026-03-05T20:48:09Z
-updated_at: 2026-03-05T20:48:40Z
+updated_at: 2026-03-05T22:50:55Z
 parent: datastar_sw-9bz9
 blocked_by:
     - datastar_sw-yzrf
