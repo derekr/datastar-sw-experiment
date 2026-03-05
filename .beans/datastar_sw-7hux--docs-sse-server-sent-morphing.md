@@ -1,11 +1,11 @@
 ---
 # datastar_sw-7hux
 title: 'Docs: SSE & Server-Sent Morphing'
-status: todo
+status: in-progress
 type: task
 priority: high
 created_at: 2026-03-05T20:48:08Z
-updated_at: 2026-03-05T20:48:40Z
+updated_at: 2026-03-05T22:42:48Z
 parent: datastar_sw-9bz9
 blocked_by:
     - datastar_sw-yzrf

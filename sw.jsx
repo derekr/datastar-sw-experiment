@@ -4402,11 +4402,134 @@ return c.body(null, 204)`}</code></pre>
   )
 }
 
+function DocsSseMorphingContent({ topic, commandMenu }) {
+  return (
+    <DocsInner topic={topic} commandMenu={commandMenu}>
+      <h1>{topic.title}</h1>
+
+      <section class="docs-section">
+        <p>When the server handles a mutation, it doesn't return JSON for the client to render. Instead, it renders the entire updated UI as HTML and <strong>pushes it to every connected client over SSE</strong>. Datastar receives the HTML and uses Idiomorph to efficiently patch the live DOM.</p>
+        <p>This is the core Datastar pattern: the server decides what the UI looks like, and the client just displays it.</p>
+      </section>
+
+      <section class="docs-section">
+        <h2>Establishing the connection</h2>
+        <p>Every page has a morph target — a container element with a <code>data-init</code> attribute that opens an SSE stream:</p>
+        <pre><code>{`<main id="app"
+  data-init="@get('/boards/abc123', { retry: 'always', retryMaxCount: 1000 })">
+  <!-- pre-rendered content here -->
+</main>`}</code></pre>
+        <p>When Datastar initializes, it sees <code>@get()</code> and opens a persistent SSE connection to that URL. The <code>retry: 'always'</code> option tells Datastar to reconnect if the stream drops. The server keeps this connection open indefinitely, pushing updates whenever state changes.</p>
+      </section>
+
+      <section class="docs-section">
+        <h2>What the server sends</h2>
+        <p>Each SSE push is a <code>datastar-patch-elements</code> event containing a CSS selector, a mode, and a block of HTML:</p>
+        <pre><code>{`event: datastar-patch-elements
+data: mode outer
+data: selector #board
+data: useViewTransition true
+data: elements <div id="board" class="board">...</div>`}</code></pre>
+        <p>The <code>selector</code> identifies which DOM element to update. The <code>mode</code> controls how — <code>outer</code> replaces the element itself (including its tag), <code>inner</code> replaces only its children. The <code>elements</code> field contains the full HTML to morph in.</p>
+        <p>On the server, a helper function handles the formatting:</p>
+        <pre><code>{`function dsePatch(selector, jsx, mode = 'outer', opts) {
+  return {
+    event: 'datastar-patch-elements',
+    data: \`mode \${mode}\\nselector \${selector}\\nelements \${jsx.toString()}\`
+  }
+}
+
+// Usage in an SSE handler:
+await stream.writeSSE(dsePatch('#board', <Board ... />, 'outer'))`}</code></pre>
+      </section>
+
+      <section class="docs-section">
+        <h2>Fat morphs: re-render everything</h2>
+        <p>Every SSE push sends the <strong>complete UI for the morph target</strong> — the entire board with all its columns and cards, not just the piece that changed. This sounds wasteful, but it's the key simplification:</p>
+        <ul class="docs-list">
+          <li><strong>No partial updates</strong> — the server doesn't need to track what changed or compute diffs. It just reads the current state and renders.</li>
+          <li><strong>No client-side state sync</strong> — the client doesn't maintain a model of the data. Every push is the full truth.</li>
+          <li><strong>Correctness by default</strong> — any state the server knows about is reflected in the push. Nothing can drift out of sync.</li>
+        </ul>
+        <p>This works because Idiomorph is fast. Morphing a full board (~100 DOM nodes) against a nearly-identical new version takes under 1ms. The network cost is also minimal — a full board is 5-15KB of HTML, sent over an already-open connection with no HTTP overhead.</p>
+      </section>
+
+      <section class="docs-section">
+        <h2>Idiomorph: smart DOM patching</h2>
+        <p>Datastar uses <a href="https://github.com/bigskysoftware/idiomorph" style="color: var(--primary-7)">Idiomorph</a> to morph the DOM. Unlike innerHTML replacement, Idiomorph diffs the old and new HTML trees and makes the minimum DOM mutations needed. This preserves:</p>
+        <ul class="docs-list">
+          <li><strong>Focus</strong> — if an input is focused, it stays focused after the morph.</li>
+          <li><strong>Scroll position</strong> — scrollable containers keep their position.</li>
+          <li><strong>CSS transitions</strong> — elements that moved get animated via view transitions.</li>
+          <li><strong>Form state</strong> — unsaved input values survive the morph.</li>
+        </ul>
+        <p>Idiomorph matches elements by <code>id</code> first, then by tag and position. This is why <strong>stable <code>id</code> attributes matter</strong>: without them, Idiomorph uses heuristic matching that can fail when siblings are added or removed.</p>
+        <pre><code>{`// Every card gets a stable id for Idiomorph matching
+<div id={\`card-\${card.id}\`} class="card" data-card-id={card.id}>
+  ...
+</div>`}</code></pre>
+      </section>
+
+      <section class="docs-section">
+        <h2>Initial load vs. SSE pushes</h2>
+        <p>Every route serves two purposes: the initial HTML page load and the SSE stream. The server distinguishes them with a header:</p>
+        <pre><code>{`app.get('/boards/:boardId', async (c) => {
+  // Datastar @get() sets this header on SSE requests
+  if (c.req.header('Datastar-Request') === 'true') {
+    return streamSSE(c, async (stream) => {
+      // Push initial state, then listen for changes
+      await push('#app', 'inner')
+      bus.addEventListener('board:\${boardId}:changed', handler)
+      while (!stream.closed) { await stream.sleep(30000) }
+    })
+  }
+  // Normal browser navigation — return full HTML document
+  return c.html('<!DOCTYPE html>' + (<Shell><Board ... /></Shell>).toString())
+})`}</code></pre>
+        <p>On initial load, the browser gets a complete HTML document with pre-rendered content. Datastar then opens the SSE connection, and the first SSE push morphs <code>#app inner</code> with fresh content. Subsequent pushes target the inner component (<code>#board outer</code>) as state changes.</p>
+      </section>
+
+      <section class="docs-section">
+        <h2>The push trigger: event bus</h2>
+        <p>After a command route appends events and updates the projection, it needs to notify all open SSE streams. This happens through a plain <code>EventTarget</code> used as an in-memory bus:</p>
+        <pre><code>{`// After events are committed to the database:
+bus.dispatchEvent(new CustomEvent('board:\${boardId}:changed'))
+
+// In the SSE handler, this listener fires:
+bus.addEventListener('board:\${boardId}:changed', async () => {
+  const data = await getBoard(boardId)       // read fresh state
+  await stream.writeSSE(dsePatch('#board',   // render + push
+    <Board board={data.board} columns={data.columns} cards={data.cards} />,
+    'outer', { useViewTransition: true }
+  ))
+})`}</code></pre>
+        <p>The bus is scoped by topic — <code>board:&lt;id&gt;:changed</code> for data mutations on a specific board, <code>boards:changed</code> for the board list, <code>global:ui</code> for app-wide UI state like the command menu.</p>
+      </section>
+
+      <section class="docs-section">
+        <h2>Multi-tab sync</h2>
+        <p>Each browser tab opens its own SSE connection. All connections share the same server-side bus. When a mutation fires a bus event, <strong>every</strong> SSE stream subscribed to that topic independently reads the latest state, renders HTML, and pushes its own morph. Two tabs viewing the same board both get updated simultaneously.</p>
+        <p>Tab counting uses the Service Worker's <code>Clients API</code> — <code>self.clients.matchAll()</code> returns all open windows. This is more reliable than tracking SSE connections, which can briefly fluctuate during Datastar's reconnect cycle.</p>
+      </section>
+
+      <section class="docs-section">
+        <h2>View transitions</h2>
+        <p>When the server includes <code>useViewTransition true</code> in the SSE event, Datastar wraps the morph in <code>document.startViewTransition()</code>. Combined with CSS <code>view-transition-name</code> on elements, this animates layout changes — columns sliding into new positions, cards fading in or out.</p>
+        <p>View transitions are enabled for data mutations (adding, moving, deleting) but not for UI-only changes (opening a menu, toggling selection mode). This keeps the UI responsive without animating every state change.</p>
+      </section>
+
+      <DocsPager topic={topic} />
+    </DocsInner>
+  )
+}
+
 // Topic content lookup — returns topic-specific component or falls back to stub
 function DocsTopicContent({ topic, commandMenu }) {
   switch (topic.slug) {
     case 'event-sourcing':
       return <DocsEventSourcingContent topic={topic} commandMenu={commandMenu} />
+    case 'sse-morphing':
+      return <DocsSseMorphingContent topic={topic} commandMenu={commandMenu} />
     default:
       return <DocsTopicStubContent topic={topic} commandMenu={commandMenu} />
   }
