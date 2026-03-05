@@ -434,11 +434,21 @@ function getUIState(boardId) {
       timeTravelEvents: null,  // array of { seq, type, data, ts } for this board, or null
       timeTravelPos: -1,       // current position in timeTravelEvents (-1 = not active)
       showHelp: false,         // whether keyboard shortcut help overlay is visible
-      commandMenu: null,       // { query: string, selectedIndex: number } or null when closed
       highlightCard: null,     // card ID to highlight (scroll-into-view + pulse), or null
     })
   }
   return boardUIState.get(boardId)
+}
+
+// ── Global UI state (not per-board) ──────────────────────────────────────────
+// Command menu lives here so it works on any page (boards list or board detail).
+
+const globalUIState = {
+  commandMenu: null,  // { query, selectedIndex, results, context } or null when closed
+}
+
+function emitGlobalUI() {
+  bus.dispatchEvent(new CustomEvent('global:ui'))
 }
 
 function clearUIState(boardId) {
@@ -1095,7 +1105,7 @@ function HelpOverlay({ boardId }) {
             <h3 class="help-section-title">Actions</h3>
             <div class="help-row"><kbd>Ctrl + Z</kbd><span>Undo</span></div>
             <div class="help-row"><kbd>Ctrl + Shift + Z</kbd><span>Redo</span></div>
-            <div class="help-row"><kbd>{'\u2318'}K</kbd><span>Search cards</span></div>
+            <div class="help-row"><kbd>{'\u2318'}K</kbd><span>Command menu</span></div>
             <div class="help-row"><kbd>Escape</kbd><span>Cancel drag / close overlay</span></div>
             <div class="help-row"><kbd>?</kbd><span>Toggle this help</span></div>
           </div>
@@ -1105,13 +1115,45 @@ function HelpOverlay({ boardId }) {
   )
 }
 
-function CommandMenu({ boardId, query, results, selectedIndex, columns }) {
-  // Build a column lookup for showing which column each card is in
-  const colMap = {}
-  for (const col of columns) colMap[col.id] = col.title
+function CommandMenu({ query, results, selectedIndex }) {
+  // Group results by their group header
+  const groups = []
+  let currentGroup = null
+  for (const r of results) {
+    if (!currentGroup || currentGroup.name !== r.group) {
+      currentGroup = { name: r.group, items: [] }
+      groups.push(currentGroup)
+    }
+    currentGroup.items.push(r)
+  }
+
+  // Build click handler per result type
+  function clickHandler(r) {
+    // Same-board card: close menu + highlight via server
+    if (r.type === 'card' && r.sameBoard) {
+      return `@post('${base()}command-menu/go', {headers:{'X-Board':'${r.boardId}','X-Card':'${r.id}'}})`
+    }
+    // Cross-board card: set highlight on target board, then navigate
+    if (r.type === 'card' && !r.sameBoard) {
+      return `fetch('${base()}command-menu/go-nav',{method:'POST',headers:{'X-Board':'${r.boardId}','X-Card':'${r.id}'}}).then(function(){window.location.href='${base()}boards/${r.boardId}'})`
+    }
+    // Board navigation
+    if (r.href) {
+      return `fetch('${base()}command-menu/close',{method:'POST'}).then(function(){window.location.href='${r.href}'})`
+    }
+    // Action: close menu + execute
+    if (r.actionUrl) {
+      return `fetch('${base()}command-menu/close',{method:'POST'}); fetch('${r.actionUrl}',{method:'POST'})`
+    }
+    return `@post('${base()}command-menu/close')`
+  }
+
+  const TYPE_ICONS = { action: '\u26A1', board: '\u25A1', card: '\uD83C\uDFF7', column: '\u2630' }
+
+  let flatIdx = 0
   return (
-    <div id="command-menu" class="command-menu-backdrop" data-on:click={`@post('${base()}boards/${boardId}/command-menu-close')`}>
-      <div class="command-menu" data-on:click__stop="void 0">
+    <div id="command-menu" class="command-menu-backdrop" data-on:click={`@post('${base()}command-menu/close')`}>
+      <div class="command-menu-panel" data-on:click__stop="void 0">
         <form id="command-menu-form" data-on:submit__prevent="void 0">
           <div class="command-menu-input-wrap">
             <span class="command-menu-icon">{'\u2315'}</span>
@@ -1119,39 +1161,54 @@ function CommandMenu({ boardId, query, results, selectedIndex, columns }) {
               id="command-menu-input"
               class="command-menu-input"
               type="text"
-              placeholder="Search cards..."
+              placeholder="Search boards, cards, actions..."
               value={query}
               autocomplete="off"
-              data-on:input__debounce_150ms={`@post('${base()}boards/${boardId}/command-menu-search', {contentType: 'form'})`}
+              data-on:input__debounce_150ms={`@post('${base()}command-menu/search', {contentType: 'form'})`}
               data-on:keydown={`
-                if (event.key === 'ArrowDown') { event.preventDefault(); @post('${base()}boards/${boardId}/command-menu-nav', {headers: {'X-Dir': 'down'}}); }
-                else if (event.key === 'ArrowUp') { event.preventDefault(); @post('${base()}boards/${boardId}/command-menu-nav', {headers: {'X-Dir': 'up'}}); }
-                else if (event.key === 'Enter') { event.preventDefault(); @post('${base()}boards/${boardId}/command-menu-select'); }
-                else if (event.key === 'Escape') { event.preventDefault(); @post('${base()}boards/${boardId}/command-menu-close'); }
+                if (event.key === 'ArrowDown') { event.preventDefault(); @post('${base()}command-menu/nav', {headers: {'X-Dir': 'down'}}); }
+                else if (event.key === 'ArrowUp') { event.preventDefault(); @post('${base()}command-menu/nav', {headers: {'X-Dir': 'up'}}); }
+                else if (event.key === 'Enter') { event.preventDefault(); var a = document.querySelector('.command-menu-result--active'); if (a) a.click(); }
+                else if (event.key === 'Escape') { event.preventDefault(); @post('${base()}command-menu/close'); }
               `}
               name="query"
             />
           </div>
         </form>
         {results.length > 0 ? (
-          <ul class="command-menu-results">
-            {results.map((r, i) => (
-              <li
-                class={`command-menu-result${i === selectedIndex ? ' command-menu-result--active' : ''}`}
-                data-on:click={`@post('${base()}boards/${boardId}/command-menu-go/${r.id}')`}
-              >
-                <span class="command-menu-result-title">
-                  {r.label && <span class="command-menu-label-dot" style={`background: ${LABEL_COLORS[r.label] || '#64748b'}`}>{' '}</span>}
-                  {r.title}
-                </span>
-                <span class="command-menu-result-col">{colMap[r.columnId] || ''}</span>
-              </li>
-            ))}
-          </ul>
+          <div class="command-menu-results">
+            {groups.map(g => {
+              const section = (
+                <div class="command-menu-section" key={g.name}>
+                  <div class="command-menu-section-header">{g.name}</div>
+                  <ul class="command-menu-section-list">
+                    {g.items.map(r => {
+                      const idx = flatIdx++
+                      return (
+                        <li
+                          class={`command-menu-result${idx === selectedIndex ? ' command-menu-result--active' : ''}`}
+                          data-on:click={clickHandler(r)}
+                          data-result-idx={idx}
+                        >
+                          <span class="command-menu-result-title">
+                            <span class="command-menu-type-icon">{TYPE_ICONS[r.type] || ''}</span>
+                            {r.type === 'card' && r.label && <span class="command-menu-label-dot" style={`background: ${LABEL_COLORS[r.label] || '#64748b'}`}>{' '}</span>}
+                            {r.title}
+                          </span>
+                          <span class="command-menu-result-sub">{r.subtitle || ''}</span>
+                        </li>
+                      )
+                    })}
+                  </ul>
+                </div>
+              )
+              return section
+            })}
+          </div>
         ) : query ? (
-          <div class="command-menu-empty">No cards found</div>
+          <div class="command-menu-empty">No results found</div>
         ) : (
-          <div class="command-menu-hint">Type to search across all cards</div>
+          <div class="command-menu-hint">Type to search across all boards and cards</div>
         )}
       </div>
     </div>
@@ -1171,7 +1228,7 @@ function StatusChip({ isOnline, unsyncedCount, hasSyncConfig }) {
   return <span id="status-chip" class="status-chip status-chip--synced" title="All events synced">Synced</span>
 }
 
-function Board({ board, columns, cards, uiState, tabCount, connStatus }) {
+function Board({ board, columns, cards, uiState, tabCount, connStatus, commandMenu }) {
   const isTimeTraveling = uiState?.timeTravelPos >= 0
   const isSelecting = !isTimeTraveling && uiState?.selectionMode
   const isEditingTitle = !isTimeTraveling && uiState?.editingBoardTitle
@@ -1245,13 +1302,11 @@ function Board({ board, columns, cards, uiState, tabCount, connStatus }) {
       {uiState?.showHelp && (
         <HelpOverlay boardId={board.id} />
       )}
-      {uiState?.commandMenu && (
+      {commandMenu && (
         <CommandMenu
-          boardId={board.id}
-          query={uiState.commandMenu.query}
-          results={uiState.commandMenu.results || []}
-          selectedIndex={uiState.commandMenu.selectedIndex}
-          columns={columns}
+          query={commandMenu.query}
+          results={commandMenu.results || []}
+          selectedIndex={commandMenu.selectedIndex}
         />
       )}
     </div>
@@ -1309,7 +1364,7 @@ function BoardCard({ board }) {
   )
 }
 
-function BoardsList({ boards }) {
+function BoardsList({ boards, commandMenu }) {
   return (
     <div id="boards-list">
       <h1>Boards</h1>
@@ -1356,6 +1411,13 @@ function BoardsList({ boards }) {
           e.target.value = '';
         });
       `)}</script>
+      {commandMenu && (
+        <CommandMenu
+          query={commandMenu.query}
+          results={commandMenu.results || []}
+          selectedIndex={commandMenu.selectedIndex}
+        />
+      )}
     </div>
   )
 }
@@ -2064,7 +2126,7 @@ input:not(#_), textarea:not(#_), select:not(#_) { font-size: max(1rem, 16px); }
   animation: fade-in 150ms ease-out;
 }
 
-.command-menu {
+.command-menu-panel {
   background: #1e293b;
   border: 1px solid #334155;
   border-radius: 12px;
@@ -2102,10 +2164,23 @@ input:not(#_), textarea:not(#_), select:not(#_) { font-size: max(1rem, 16px); }
 .command-menu-input::placeholder { color: #64748b; }
 
 .command-menu-results {
+  overflow-y: auto;
+  padding-bottom: 4px;
+}
+
+.command-menu-section-header {
+  padding: 8px 16px 4px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #64748b;
+}
+
+.command-menu-section-list {
   list-style: none;
   margin: 0;
-  padding: 8px 0;
-  overflow-y: auto;
+  padding: 0;
 }
 
 .command-menu-result {
@@ -2127,11 +2202,19 @@ input:not(#_), textarea:not(#_), select:not(#_) { font-size: max(1rem, 16px); }
 .command-menu-result-title {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.command-menu-type-icon {
+  flex-shrink: 0;
+  font-size: 0.75rem;
+  opacity: 0.6;
+  width: 1.1em;
+  text-align: center;
 }
 
 .command-menu-label-dot {
@@ -2144,7 +2227,7 @@ input:not(#_), textarea:not(#_), select:not(#_) { font-size: max(1rem, 16px); }
   line-height: 0;
 }
 
-.command-menu-result-col {
+.command-menu-result-sub {
   color: #64748b;
   font-size: 0.8rem;
   flex-shrink: 0;
@@ -2578,40 +2661,40 @@ function Shell({ path, children }) {
             fetch('${base()}boards/' + boardId + '/' + action, { method: 'POST' });
           });
 
-          // Cmd+K → toggle command menu
+          // Cmd+K → toggle command menu (works on any page)
           document.addEventListener('keydown', function(e) {
             if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
               e.preventDefault();
-              var boardMatch = location.pathname.match(/boards\\/([^/]+)/);
-              if (!boardMatch) return;
-              fetch('${base()}boards/' + boardMatch[1] + '/command-menu', { method: 'POST' });
+              fetch('${base()}command-menu/open', {
+                method: 'POST',
+                headers: { 'X-Context': location.pathname }
+              });
             }
           });
 
-          // ? key → toggle help overlay; Escape → dismiss overlays
+          // Escape → dismiss command menu (global) or help overlay (board-specific)
+          // ? key → toggle help overlay (board-specific)
           document.addEventListener('keydown', function(e) {
-            var tag = (e.target.tagName || '').toLowerCase();
-            // Escape should work even from command menu input
             if (e.key === 'Escape') {
-              var boardMatch = location.pathname.match(/boards\\/([^/]+)/);
-              if (!boardMatch) return;
-              var boardId = boardMatch[1];
               if (document.getElementById('command-menu')) {
                 e.preventDefault();
-                fetch('${base()}boards/' + boardId + '/command-menu-close', { method: 'POST' });
-              } else if (document.getElementById('help-overlay')) {
+                fetch('${base()}command-menu/close', { method: 'POST' });
+                return;
+              }
+              var boardMatch = location.pathname.match(/boards\\/([^/]+)/);
+              if (boardMatch && document.getElementById('help-overlay')) {
                 e.preventDefault();
-                fetch('${base()}boards/' + boardId + '/help-dismiss', { method: 'POST' });
+                fetch('${base()}boards/' + boardMatch[1] + '/help-dismiss', { method: 'POST' });
               }
               return;
             }
+            var tag = (e.target.tagName || '').toLowerCase();
             if (tag === 'input' || tag === 'textarea') return;
             var boardMatch = location.pathname.match(/boards\\/([^/]+)/);
             if (!boardMatch) return;
-            var boardId = boardMatch[1];
             if (e.key === '?') {
               e.preventDefault();
-              fetch('${base()}boards/' + boardId + '/help', { method: 'POST' });
+              fetch('${base()}boards/' + boardMatch[1] + '/help', { method: 'POST' });
             }
           });
 
@@ -2833,7 +2916,7 @@ app.get('/', async (c) => {
     return streamSSE(c, async (stream) => {
       const push = async (selector, mode, opts) => {
         const boards = await getBoards()
-        await stream.writeSSE(dsePatch(selector, <BoardsList boards={boards} />, mode, opts))
+        await stream.writeSSE(dsePatch(selector, <BoardsList boards={boards} commandMenu={globalUIState.commandMenu} />, mode, opts))
       }
 
       const handler = (e) => {
@@ -2851,7 +2934,15 @@ app.get('/', async (c) => {
         }
       }
       bus.addEventListener('boards:changed', handler)
-      stream.onAbort(() => bus.removeEventListener('boards:changed', handler))
+
+      // Re-push when global UI changes (command menu open/close/search)
+      const globalUIHandler = () => push('#boards-list', 'outer')
+      bus.addEventListener('global:ui', globalUIHandler)
+
+      stream.onAbort(() => {
+        bus.removeEventListener('boards:changed', handler)
+        bus.removeEventListener('global:ui', globalUIHandler)
+      })
 
       await push('#app', 'inner')
       while (!stream.closed) { await stream.sleep(30000) }
@@ -2859,7 +2950,7 @@ app.get('/', async (c) => {
   }
 
   const boards = await getBoards()
-  return c.html('<!DOCTYPE html>' + (<Shell path="/"><BoardsList boards={boards} /></Shell>).toString())
+  return c.html('<!DOCTYPE html>' + (<Shell path="/"><BoardsList boards={boards} commandMenu={globalUIState.commandMenu} /></Shell>).toString())
 })
 
 // Command: create board
@@ -2915,7 +3006,7 @@ app.get('/boards/:boardId', async (c) => {
         if (!data) return
         const tabCount = await getTabCount(boardId)
         const connStatus = await getConnectionStatus()
-        await stream.writeSSE(dsePatch(selector, <Board board={data.board} columns={data.columns} cards={data.cards} uiState={ui} tabCount={tabCount} connStatus={connStatus} />, mode, opts))
+        await stream.writeSSE(dsePatch(selector, <Board board={data.board} columns={data.columns} cards={data.cards} uiState={ui} tabCount={tabCount} connStatus={connStatus} commandMenu={globalUIState.commandMenu} />, mode, opts))
       }
 
       const topic = `board:${boardId}:changed`
@@ -2927,9 +3018,14 @@ app.get('/boards/:boardId', async (c) => {
       const uiHandler = () => pushBoard('#board', 'outer')
       bus.addEventListener(uiTopic, uiHandler)
 
+      // Re-push when global UI changes (command menu open/close/search)
+      const globalUIHandler = () => pushBoard('#board', 'outer')
+      bus.addEventListener('global:ui', globalUIHandler)
+
       stream.onAbort(() => {
         bus.removeEventListener(topic, handler)
         bus.removeEventListener(uiTopic, uiHandler)
+        bus.removeEventListener('global:ui', globalUIHandler)
         notifyTabChange(boardId)
       })
 
@@ -2944,7 +3040,7 @@ app.get('/boards/:boardId', async (c) => {
   const connStatus = await getConnectionStatus()
   return c.html('<!DOCTYPE html>' + (
     <Shell path={`/boards/${boardId}`}>
-      {data ? <Board board={data.board} columns={data.columns} cards={data.cards} uiState={ui} tabCount={0} connStatus={connStatus} /> : <p>Board not found</p>}
+      {data ? <Board board={data.board} columns={data.columns} cards={data.cards} uiState={ui} tabCount={0} connStatus={connStatus} commandMenu={globalUIState.commandMenu} /> : <p>Board not found</p>}
     </Shell>
   ).toString())
 })
@@ -3409,120 +3505,266 @@ app.post('/boards/:boardId/help-dismiss', async (c) => {
   return c.body(null, 204)
 })
 
-// Command menu: open
-app.post('/boards/:boardId/command-menu', async (c) => {
+// ── Global command menu (Cmd+K) ──────────────────────────────────────────────
+
+// Build contextual results for the command menu.
+// `context` is the URL path the user is on (e.g. '/' or '/boards/abc').
+async function buildCommandMenuResults(query, context) {
   await initialize()
-  const boardId = c.req.param('boardId')
-  const ui = getUIState(boardId)
-  if (ui.commandMenu) {
-    // Toggle off if already open
-    ui.commandMenu = null
-  } else {
-    ui.commandMenu = { query: '', selectedIndex: 0, results: [] }
+  const db = await dbPromise
+  const q = (query || '').toLowerCase()
+
+  const boardMatch = context.match(/\/boards\/([^/]+)/)
+  const currentBoardId = boardMatch ? boardMatch[1] : null
+
+  const boards = await db.getAll('boards')
+  const columns = await db.getAll('columns')
+  const cards = await db.getAll('cards')
+
+  const boardMap = Object.fromEntries(boards.map(b => [b.id, b]))
+  const colMap = Object.fromEntries(columns.map(c => [c.id, c]))
+  const boardColCount = {}
+  const boardCardCount = {}
+  for (const col of columns) {
+    boardColCount[col.boardId] = (boardColCount[col.boardId] || 0) + 1
   }
-  emitUI(boardId)
+  for (const card of cards) {
+    const col = colMap[card.columnId]
+    if (col) boardCardCount[col.boardId] = (boardCardCount[col.boardId] || 0) + 1
+  }
+
+  const results = []
+
+  // --- Contextual actions (state-aware) ---
+  const actions = []
+  if (currentBoardId) {
+    const ui = getUIState(currentBoardId)
+    const isSelecting = ui.selectionMode
+    const isTimeTraveling = ui.timeTravelPos >= 0
+    const selectedCount = ui.selectedCards?.size || 0
+    const boardColumns = columns.filter(c => c.boardId === currentBoardId).sort(cmpPosition)
+
+    if (isSelecting) {
+      // Selection mode active — show exit + batch actions
+      actions.push(
+        { type: 'action', id: 'a-exit-select', title: 'Exit selection mode', subtitle: `${selectedCount} selected`, group: 'Actions', actionUrl: `${base()}boards/${currentBoardId}/select-mode/cancel` },
+      )
+      if (selectedCount > 0) {
+        actions.push(
+          { type: 'action', id: 'a-batch-delete', title: `Delete ${selectedCount} selected`, subtitle: '', group: 'Actions', actionUrl: `${base()}boards/${currentBoardId}/batch-delete` },
+        )
+        for (const col of boardColumns) {
+          actions.push(
+            { type: 'action', id: `a-move-${col.id}`, title: `Move to ${col.title}`, subtitle: `${selectedCount} cards`, group: 'Move selected', actionUrl: `${base()}boards/${currentBoardId}/batch-move/${col.id}` },
+          )
+        }
+      }
+    } else if (isTimeTraveling) {
+      // Time travel active — show exit
+      actions.push(
+        { type: 'action', id: 'a-exit-tt', title: 'Exit time travel', subtitle: '', group: 'Actions', actionUrl: `${base()}boards/${currentBoardId}/time-travel-exit` },
+      )
+    } else {
+      // Normal mode
+      actions.push(
+        { type: 'action', id: 'a-undo', title: 'Undo', subtitle: 'Ctrl+Z', group: 'Actions', actionUrl: `${base()}boards/${currentBoardId}/undo` },
+        { type: 'action', id: 'a-redo', title: 'Redo', subtitle: 'Ctrl+Shift+Z', group: 'Actions', actionUrl: `${base()}boards/${currentBoardId}/redo` },
+        { type: 'action', id: 'a-select', title: 'Selection mode', subtitle: '', group: 'Actions', actionUrl: `${base()}boards/${currentBoardId}/select-mode` },
+        { type: 'action', id: 'a-history', title: 'History', subtitle: '', group: 'Actions', actionUrl: `${base()}boards/${currentBoardId}/time-travel` },
+      )
+    }
+    // Always available regardless of mode
+    actions.push(
+      { type: 'action', id: 'a-help', title: ui.showHelp ? 'Close help' : 'Keyboard shortcuts', subtitle: '?', group: 'Actions', actionUrl: `${base()}boards/${currentBoardId}/help` },
+      { type: 'action', id: 'a-boards', title: 'All boards', subtitle: '', group: 'Actions', href: base() },
+    )
+  }
+  for (const action of actions) {
+    if (!q || action.title.toLowerCase().includes(q)) results.push(action)
+  }
+
+  if (currentBoardId) {
+    // --- Current board cards ---
+    if (q) {
+      const currentColIds = new Set(columns.filter(c => c.boardId === currentBoardId).map(c => c.id))
+      const matchingCards = cards
+        .filter(c => currentColIds.has(c.columnId) && (
+          c.title.toLowerCase().includes(q) || (c.description || '').toLowerCase().includes(q)
+        ))
+        .sort(cmpPosition)
+        .slice(0, 12)
+      for (const card of matchingCards) {
+        const col = colMap[card.columnId]
+        results.push({
+          type: 'card', id: card.id, title: card.title,
+          subtitle: col ? col.title : '',
+          group: 'This board',
+          boardId: currentBoardId, sameBoard: true,
+          label: card.label || null,
+        })
+      }
+    }
+
+    // --- Other boards matching query ---
+    const matchingBoards = q
+      ? boards.filter(b => b.id !== currentBoardId && b.title.toLowerCase().includes(q))
+      : boards.filter(b => b.id !== currentBoardId)
+    for (const b of matchingBoards.slice(0, 6)) {
+      results.push({
+        type: 'board', id: b.id, title: b.title,
+        subtitle: `${boardColCount[b.id] || 0} cols \u00B7 ${boardCardCount[b.id] || 0} cards`,
+        group: 'Boards',
+        href: `${base()}boards/${b.id}`,
+      })
+    }
+
+    // --- Cross-board cards ---
+    if (q) {
+      const currentColIds = new Set(columns.filter(c => c.boardId === currentBoardId).map(c => c.id))
+      const otherCards = cards
+        .filter(c => {
+          const col = colMap[c.columnId]
+          if (!col || currentColIds.has(c.columnId)) return false
+          return c.title.toLowerCase().includes(q) || (c.description || '').toLowerCase().includes(q)
+        })
+        .sort(cmpPosition)
+        .slice(0, 6)
+      for (const card of otherCards) {
+        const col = colMap[card.columnId]
+        const board = col ? boardMap[col.boardId] : null
+        results.push({
+          type: 'card', id: card.id, title: card.title,
+          subtitle: `${board?.title || ''} / ${col?.title || ''}`,
+          group: 'Other boards',
+          boardId: col?.boardId, sameBoard: false,
+          label: card.label || null,
+        })
+      }
+    }
+  } else {
+    // --- On boards list: show boards ---
+    const matchingBoards = q ? boards.filter(b => b.title.toLowerCase().includes(q)) : boards
+    for (const b of matchingBoards.slice(0, 10)) {
+      results.push({
+        type: 'board', id: b.id, title: b.title,
+        subtitle: `${boardColCount[b.id] || 0} cols \u00B7 ${boardCardCount[b.id] || 0} cards`,
+        group: 'Boards',
+        href: `${base()}boards/${b.id}`,
+      })
+    }
+
+    // --- Cards across all boards ---
+    if (q) {
+      const matchingCards = cards
+        .filter(c => c.title.toLowerCase().includes(q) || (c.description || '').toLowerCase().includes(q))
+        .sort(cmpPosition)
+        .slice(0, 10)
+      for (const card of matchingCards) {
+        const col = colMap[card.columnId]
+        const board = col ? boardMap[col.boardId] : null
+        results.push({
+          type: 'card', id: card.id, title: card.title,
+          subtitle: `${board?.title || ''} / ${col?.title || ''}`,
+          group: 'Cards',
+          boardId: col?.boardId, sameBoard: false,
+          label: card.label || null,
+        })
+      }
+    }
+  }
+
+  return results
+}
+
+// Command menu: open (toggle)
+app.post('/command-menu/open', async (c) => {
+  const context = c.req.header('X-Context') || '/'
+  if (globalUIState.commandMenu) {
+    globalUIState.commandMenu = null
+  } else {
+    const results = await buildCommandMenuResults('', context)
+    globalUIState.commandMenu = { query: '', selectedIndex: 0, results, context }
+  }
+  emitGlobalUI()
   return c.body(null, 204)
 })
 
 // Command menu: close
-app.post('/boards/:boardId/command-menu-close', async (c) => {
-  const boardId = c.req.param('boardId')
-  const ui = getUIState(boardId)
-  ui.commandMenu = null
-  emitUI(boardId)
+app.post('/command-menu/close', async (c) => {
+  globalUIState.commandMenu = null
+  emitGlobalUI()
   return c.body(null, 204)
 })
 
 // Command menu: search
-app.post('/boards/:boardId/command-menu-search', async (c) => {
-  await initialize()
-  const boardId = c.req.param('boardId')
+app.post('/command-menu/search', async (c) => {
   const body = await c.req.parseBody()
-  const query = (body.query || '').trim().toLowerCase()
-  const ui = getUIState(boardId)
-  if (!ui.commandMenu) return c.body(null, 204)
+  const query = (body.query || '').trim()
+  const cm = globalUIState.commandMenu
+  if (!cm) return c.body(null, 204)
 
-  if (!query) {
-    ui.commandMenu.query = ''
-    ui.commandMenu.results = []
-    ui.commandMenu.selectedIndex = 0
-    emitUI(boardId)
-    return c.body(null, 204)
-  }
-
-  const data = await getBoard(boardId)
-  if (!data) return c.body(null, 404)
-
-  const results = data.cards
-    .filter(card => {
-      const title = (card.title || '').toLowerCase()
-      const desc = (card.description || '').toLowerCase()
-      return title.includes(query) || desc.includes(query)
-    })
-    .sort(cmpPosition)
-    .slice(0, 20) // cap results
-    .map(card => ({ id: card.id, title: card.title, label: card.label || null, columnId: card.columnId }))
-
-  ui.commandMenu.query = body.query || ''
-  ui.commandMenu.results = results
-  ui.commandMenu.selectedIndex = Math.min(ui.commandMenu.selectedIndex, Math.max(0, results.length - 1))
-  emitUI(boardId)
+  const results = await buildCommandMenuResults(query, cm.context || '/')
+  cm.query = body.query || ''
+  cm.results = results
+  cm.selectedIndex = Math.min(cm.selectedIndex, Math.max(0, results.length - 1))
+  emitGlobalUI()
   return c.body(null, 204)
 })
 
 // Command menu: navigate (arrow keys)
-app.post('/boards/:boardId/command-menu-nav', async (c) => {
-  const boardId = c.req.param('boardId')
+app.post('/command-menu/nav', async (c) => {
   const dir = c.req.header('X-Dir')
-  const ui = getUIState(boardId)
-  if (!ui.commandMenu || !ui.commandMenu.results.length) return c.body(null, 204)
-  const len = ui.commandMenu.results.length
+  const cm = globalUIState.commandMenu
+  if (!cm || !cm.results.length) return c.body(null, 204)
+  const len = cm.results.length
   if (dir === 'down') {
-    ui.commandMenu.selectedIndex = (ui.commandMenu.selectedIndex + 1) % len
+    cm.selectedIndex = (cm.selectedIndex + 1) % len
   } else if (dir === 'up') {
-    ui.commandMenu.selectedIndex = (ui.commandMenu.selectedIndex - 1 + len) % len
+    cm.selectedIndex = (cm.selectedIndex - 1 + len) % len
   }
-  emitUI(boardId)
+  emitGlobalUI()
   return c.body(null, 204)
 })
 
-// Command menu: select (Enter — go to the selected result)
-app.post('/boards/:boardId/command-menu-select', async (c) => {
-  const boardId = c.req.param('boardId')
-  const ui = getUIState(boardId)
-  if (!ui.commandMenu || !ui.commandMenu.results.length) return c.body(null, 204)
-  const selected = ui.commandMenu.results[ui.commandMenu.selectedIndex]
-  if (!selected) return c.body(null, 204)
-  // Close menu and set highlight
-  ui.commandMenu = null
-  ui.highlightCard = selected.id
-  emitUI(boardId)
-  // Clear highlight after a delay (3s)
-  setTimeout(() => {
-    const u = getUIState(boardId)
-    if (u.highlightCard === selected.id) {
-      u.highlightCard = null
-      emitUI(boardId)
-    }
-  }, 3000)
+// Command menu: go to same-board card (close + highlight)
+app.post('/command-menu/go', async (c) => {
+  const boardId = c.req.header('X-Board')
+  const cardId = c.req.header('X-Card')
+  globalUIState.commandMenu = null
+  emitGlobalUI()
+  if (boardId && cardId) {
+    const ui = getUIState(boardId)
+    ui.highlightCard = cardId
+    emitUI(boardId)
+    setTimeout(() => {
+      const u = getUIState(boardId)
+      if (u.highlightCard === cardId) {
+        u.highlightCard = null
+        emitUI(boardId)
+      }
+    }, 3000)
+  }
   return c.body(null, 204)
 })
 
-// Command menu: go directly to a card (click on result)
-app.post('/boards/:boardId/command-menu-go/:cardId', async (c) => {
-  const boardId = c.req.param('boardId')
-  const cardId = c.req.param('cardId')
-  const ui = getUIState(boardId)
-  ui.commandMenu = null
-  ui.highlightCard = cardId
-  emitUI(boardId)
-  setTimeout(() => {
-    const u = getUIState(boardId)
-    if (u.highlightCard === cardId) {
-      u.highlightCard = null
-      emitUI(boardId)
-    }
-  }, 3000)
+// Command menu: go to cross-board card (close + set highlight for post-navigation)
+app.post('/command-menu/go-nav', async (c) => {
+  const boardId = c.req.header('X-Board')
+  const cardId = c.req.header('X-Card')
+  globalUIState.commandMenu = null
+  emitGlobalUI()
+  if (boardId && cardId) {
+    // Pre-set highlight so when the board page loads, the card is highlighted
+    const ui = getUIState(boardId)
+    ui.highlightCard = cardId
+    setTimeout(() => {
+      const u = getUIState(boardId)
+      if (u.highlightCard === cardId) {
+        u.highlightCard = null
+        emitUI(boardId)
+      }
+    }, 3000)
+  }
   return c.body(null, 204)
 })
 

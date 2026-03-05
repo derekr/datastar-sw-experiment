@@ -819,14 +819,62 @@
       })
     }
 
+    function isSelectionMode() {
+      return !!boardEl.querySelector('.selection-bar')
+    }
+
+    // In selection mode, auto-focus the first card if nothing is focused
+    function ensureCardFocus() {
+      var focused = document.activeElement
+      if (focused && boardEl.contains(focused) &&
+          (focused.classList.contains('card') || focused.classList.contains('column-header'))) {
+        return // already focused on a navigable element
+      }
+      var first = boardEl.querySelector('.card')
+      if (first) focusCard(first)
+    }
+
     function onKeyDown(e) {
       if (e.key === 'Escape' && drag) {
         onPointerCancel(e)
         return
       }
 
+      var selecting = isSelectionMode()
+
+      // Space/Enter on a focused card in selection mode → toggle selection
+      if (selecting && (e.key === ' ' || e.key === 'Enter')) {
+        var focused = document.activeElement
+        if (focused && boardEl.contains(focused) && focused.classList.contains('card')) {
+          e.preventDefault()
+          focused.click() // triggers Datastar's data-on:click → toggle-select
+          return
+        }
+      }
+
       var dir = directionFor(e.key)
       if (!dir) return
+
+      // In selection mode, arrow keys should work even if nothing is focused yet
+      if (selecting) {
+        var focused = document.activeElement
+        var hasFocusInBoard = focused && boardEl.contains(focused) &&
+          (focused.classList.contains('card') || focused.classList.contains('column-header'))
+
+        if (!hasFocusInBoard) {
+          e.preventDefault()
+          ensureCardFocus()
+          return
+        }
+
+        // No Ctrl+arrow moves in selection mode
+        var isCard = focused.classList.contains('card')
+        var isHeader = focused.classList.contains('column-header')
+        e.preventDefault()
+        if (isCard) navigateFromCard(focused, dir)
+        else if (isHeader) navigateFromHeader(focused, dir)
+        return
+      }
 
       var focused = document.activeElement
       if (!focused || !boardEl.contains(focused)) return
