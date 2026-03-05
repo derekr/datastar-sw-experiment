@@ -4742,6 +4742,152 @@ app.post('/cards/:cardId/sheet', async (c) => {
   )
 }
 
+function DocsServiceWorkerContent({ topic, commandMenu }) {
+  return (
+    <DocsInner topic={topic} commandMenu={commandMenu}>
+      <h1>{topic.title}</h1>
+
+      <section class="docs-section">
+        <p><strong>This is not a recommended Datastar pattern.</strong> The service worker as server is an interesting experiment that makes this demo self-contained — no backend infrastructure required. Datastar works best with a real server in any language.</p>
+        <p>That said, running a server inside a service worker teaches you a lot about how the browser, service workers, and SSE interact. This bonus section covers the implementation details.</p>
+      </section>
+
+      <section class="docs-section">
+        <h2>Why a service worker?</h2>
+        <p>This app runs entirely in the browser. No backend server, no database hosting, no deployment pipeline. The service worker intercepts requests, runs a Hono server, talks to IndexedDB, and pushes HTML via SSE. It's a full-stack app in a single JavaScript file.</p>
+        <p>The tradeoffs are significant, covered below. But for an educational demo, it means you can clone the repo, run <code>pnpm dev</code>, and have a working app with zero setup.</p>
+      </section>
+
+      <section class="docs-section">
+        <h2>Fetch interception</h2>
+        <p>The service worker registers a <code>fetch</code> event listener that decides what to serve:</p>
+        <pre><code>{`self.addEventListener('fetch', (event) => {
+  const url = new URL(event.request.url)
+  
+  // Static assets: let the browser handle them.
+  // This regex passes JS, CSS, images, fonts through to the network.
+  if (/\\.(js|css|png|svg|ico|woff2?|json|webmanifest)/.test(url.pathname)) {
+    return
+  }
+  
+  // Strip the SW scope prefix so Hono routes match.
+  // /datastar-sw-experiment/boards/123 → /boards/123
+  const scope = new URL(self.registration.scope).pathname
+  if (scope !== '/' && url.pathname.startsWith(scope)) {
+    url.pathname = '/' + url.pathname.slice(scope.length)
+  }
+  
+  // Forward to Hono
+  event.respondWith(app.fetch(new Request(url, init)))
+})`}</code></pre>
+        <p>Static assets bypass the service worker entirely — they're served by Vite in development or cached by the browser in production. This is critical for a Safari quirk: the browser's fetch handler doesn't reliably intercept <code>&lt;script src&gt;</code> subresource requests on service-worker-served pages.</p>
+      </section>
+
+      <section class="docs-section">
+        <h2>The base() function</h2>
+        <p>GitHub Pages serves this app under a subpath: <code>/datastar-sw-experiment/</code>. Every URL in the rendered HTML must include this prefix. The <code>base()</code> helper returns it:</p>
+        <pre><code>{`function base() {
+  if (!_base) _base = new URL(self.registration.scope).pathname
+  return _base
+}
+
+// Usage in JSX:
+<a href={\`\${base()}boards/\${board.id}\`}>Board</a>
+<link rel="stylesheet" href={\`\${base()}\${__STELLAR_CSS__}\`} />`}</code></pre>
+        <p>This is used everywhere: routes, form actions, SSE URLs, stylesheet links, script src, even the manifest href. Without it, links break on GitHub Pages.</p>
+      </section>
+
+      <section class="docs-section">
+        <h2>Lifecycle: install, activate, idle kill</h2>
+        <p>Service workers have a strict lifecycle:</p>
+        <ul class="docs-list">
+          <li><strong>install</strong> — calls <code>skipWaiting()</code> to take control immediately.</li>
+          <li><strong>activate</strong> — calls <code>clients.claim()</code> to take control of existing pages without reload.</li>
+          <li><strong>idle kill</strong> — browsers terminate idle service workers after ~30 seconds. When you come back, the SW restarts fresh.</li>
+        </ul>
+        <p>This means in-memory state is <strong>ephemeral</strong>. The event bus, <code>boardUIState</code>, caches — all gone on restart. The app handles this through event sourcing: on startup, it loads a snapshot from IndexedDB and replays events after the snapshot sequence number.</p>
+      </section>
+
+      <section class="docs-section">
+        <h2>Ephemeral state: what survives restart</h2>
+        <table class="docs-table">
+          <thead>
+            <tr><th>State</th><th>Survives SW restart?</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>IndexedDB (events, projections)</td><td>Yes — persisted to disk</td></tr>
+            <tr><td>boardUIState (editing, selection)</td><td>No — in-memory Map</td></tr>
+            <tr><td>Event bus listeners</td><td>No — recreated on each request</td></tr>
+            <tr><td>Theme preference (localStorage)</td><td>Yes — browser storage</td></tr>
+          </tbody>
+        </table>
+        <p>When the SW restarts, boards open fresh: no open action sheets, no editing, no selection. This is actually correct behavior — the user hasn't done anything yet in this SW instance.</p>
+      </section>
+
+      <section class="docs-section">
+        <h2>SSE in a service worker</h2>
+        <p>Server-Sent Events work inside a service worker, but with caveats:</p>
+        <ul class="docs-list">
+          <li>The SSE connection persists as long as the SW is alive. When the SW is killed, SSE drops silently.</li>
+          <li>Datastar's <code>retry: 'always'</code> option handles reconnection — when the SW restarts, the client reconnects and gets a fresh morph.</li>
+          <li>No WebSockets in service workers — SSE is the only real-time option.</li>
+        </ul>
+        <p>Each SSE stream needs a keep-alive loop to prevent premature closure:</p>
+        <pre><code>{`// Without this, the stream closes when the bus has no events.
+while (!stream.closed) {
+  await stream.sleep(30000)  // check every 30s
+}`}</code></pre>
+      </section>
+
+      <section class="docs-section">
+        <h2>Debugging in a separate context</h2>
+        <p>Service worker console logs appear in a different DevTools context than the page. This is confusing — <code>console.log</code> in the SW doesn't show up in the page's console.</p>
+        <p>This app works around it with a broadcast channel:</p>
+        <pre><code>{`// In the SW:
+self.clients.matchAll().forEach(client => {
+  client.postMessage({ type: 'log', args: [...] })
+})
+
+// In the page:
+navigator.serviceWorker.addEventListener('message', (e) => {
+  if (e.data.type === 'log') console.log(...e.data.args)
+})`}</code></pre>
+        <p>Still, breakpoints and debugging require opening DevTools → Application → Service Workers → click the link to open the SW's console.</p>
+      </section>
+
+      <section class="docs-section">
+        <h2>Development friction: picking up changes</h2>
+        <p>Browsers aggressively cache service workers. After editing <code>sw.jsx</code>, the old version may be served for up to 24 hours.</p>
+        <p>The fix in this app:</p>
+        <pre><code>{`// In index.html — on every page load in dev mode:
+if (import.meta.hot) {
+  reg.update()  // check for new SW
+  import.meta.hot.on('sw-updated', () => reg.update())
+}`}</code></pre>
+        <p>When Vite rebuilds the SW, it sends an <code>sw-updated</code> HMR event. The page responds by calling <code>reg.update()</code>, which checks the server for a new version. Combined with <code>skipWaiting()</code> in the SW, this triggers an automatic update.</p>
+      </section>
+
+      <section class="docs-section">
+        <h2>Pros and cons</h2>
+        <table class="docs-table">
+          <thead>
+            <tr><th>Pros</th><th>Cons</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Zero infrastructure</td><td>Browser kills idle SW (~30s)</td></tr>
+            <tr><td>Fully offline capable</td><td>No WebSocket support</td></tr>
+            <tr><td>Single-file server</td><td>Debugging in separate console</td></tr>
+            <tr><td>No deployment needed</td><td>Safari can't intercept script src</td></tr>
+            <tr><td>Instant latency (localhost)</td><td>Ephemeral in-memory state</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <DocsPager topic={topic} />
+    </DocsInner>
+  )
+}
+
 // Topic content lookup — returns topic-specific component or falls back to stub
 function DocsTopicContent({ topic, commandMenu }) {
   switch (topic.slug) {
@@ -4751,6 +4897,8 @@ function DocsTopicContent({ topic, commandMenu }) {
       return <DocsSseMorphingContent topic={topic} commandMenu={commandMenu} />
     case 'signals':
       return <DocsSignalsContent topic={topic} commandMenu={commandMenu} />
+    case 'service-worker':
+      return <DocsServiceWorkerContent topic={topic} commandMenu={commandMenu} />
     default:
       return <DocsTopicStubContent topic={topic} commandMenu={commandMenu} />
   }
