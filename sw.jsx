@@ -120,7 +120,7 @@ const ALLOWED_EVENT_TYPES = new Set(Object.keys(EVENT_VERSIONS))
 
 const DOCS_TOPICS = [
   { slug: 'event-sourcing', title: 'Event Sourcing & CQRS',          section: 'core' },
-  { slug: 'fat-morphing',   title: 'Fat Morphing',                    section: 'core' },
+  { slug: 'fat-morphing',   title: 'SSE & Fat Morphing',              section: 'core' },
   { slug: 'signals',        title: 'Signals & Server-Owned UI State', section: 'core' },
   { slug: 'hypermedia',     title: 'Hypermedia — The Missing Pattern', section: 'core' },
   { slug: 'mpa-navigations', title: 'MPA Navigations',                section: 'bonus' },
