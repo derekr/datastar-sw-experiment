@@ -444,7 +444,7 @@ function getUIState(boardId) {
 // Command menu lives here so it works on any page (boards list or board detail).
 
 const globalUIState = {
-  commandMenu: null,  // { query, selectedIndex, results, context } or null when closed
+  commandMenu: null,  // { query, results, context } or null when closed
 }
 
 function emitGlobalUI() {
@@ -1115,7 +1115,7 @@ function HelpOverlay({ boardId }) {
   )
 }
 
-function CommandMenu({ query, results, selectedIndex }) {
+function CommandMenu({ query, results }) {
   // Group results by their group header
   const groups = []
   let currentGroup = null
@@ -1153,7 +1153,7 @@ function CommandMenu({ query, results, selectedIndex }) {
   let flatIdx = 0
   return (
     <div id="command-menu" class="command-menu-backdrop" data-on:click={`@post('${base()}command-menu/close')`}>
-      <div class="command-menu-panel" data-on:click__stop="void 0">
+      <div class="command-menu-panel" data-on:click__stop="void 0" data-signals={`{cmdIdx: 0, cmdCount: ${results.length}}`}>
         <form id="command-menu-form" data-on:submit__prevent="void 0">
           <div class="command-menu-input-wrap">
             <span class="command-menu-icon">{'\u2315'}</span>
@@ -1164,10 +1164,10 @@ function CommandMenu({ query, results, selectedIndex }) {
               placeholder="Search boards, cards, actions..."
               value={query}
               autocomplete="off"
-              data-on:input__debounce_150ms={`@post('${base()}command-menu/search', {contentType: 'form'})`}
+              data-on:input__debounce_150ms={`$cmdIdx = 0; @post('${base()}command-menu/search', {contentType: 'form'})`}
               data-on:keydown={`
-                if (event.key === 'ArrowDown') { event.preventDefault(); @post('${base()}command-menu/nav', {headers: {'X-Dir': 'down'}}); }
-                else if (event.key === 'ArrowUp') { event.preventDefault(); @post('${base()}command-menu/nav', {headers: {'X-Dir': 'up'}}); }
+                if (event.key === 'ArrowDown') { event.preventDefault(); $cmdIdx = ($cmdIdx + 1) % $cmdCount; }
+                else if (event.key === 'ArrowUp') { event.preventDefault(); $cmdIdx = ($cmdIdx - 1 + $cmdCount) % $cmdCount; }
                 else if (event.key === 'Enter') { event.preventDefault(); var a = document.querySelector('.command-menu-result--active'); if (a) a.click(); }
                 else if (event.key === 'Escape') { event.preventDefault(); @post('${base()}command-menu/close'); }
               `}
@@ -1186,9 +1186,9 @@ function CommandMenu({ query, results, selectedIndex }) {
                       const idx = flatIdx++
                       return (
                         <li
-                          class={`command-menu-result${idx === selectedIndex ? ' command-menu-result--active' : ''}`}
+                          class="command-menu-result"
+                          data-class={`{'command-menu-result--active': $cmdIdx === ${idx}}`}
                           data-on:click={clickHandler(r)}
-                          data-result-idx={idx}
                         >
                           <span class="command-menu-result-title">
                             <span class="command-menu-type-icon">{TYPE_ICONS[r.type] || ''}</span>
@@ -1306,7 +1306,6 @@ function Board({ board, columns, cards, uiState, tabCount, connStatus, commandMe
         <CommandMenu
           query={commandMenu.query}
           results={commandMenu.results || []}
-          selectedIndex={commandMenu.selectedIndex}
         />
       )}
     </div>
@@ -1415,7 +1414,6 @@ function BoardsList({ boards, commandMenu }) {
         <CommandMenu
           query={commandMenu.query}
           results={commandMenu.results || []}
-          selectedIndex={commandMenu.selectedIndex}
         />
       )}
     </div>
@@ -3675,7 +3673,7 @@ app.post('/command-menu/open', async (c) => {
     globalUIState.commandMenu = null
   } else {
     const results = await buildCommandMenuResults('', context)
-    globalUIState.commandMenu = { query: '', selectedIndex: 0, results, context }
+    globalUIState.commandMenu = { query: '', results, context }
   }
   emitGlobalUI()
   return c.body(null, 204)
@@ -3698,22 +3696,6 @@ app.post('/command-menu/search', async (c) => {
   const results = await buildCommandMenuResults(query, cm.context || '/')
   cm.query = body.query || ''
   cm.results = results
-  cm.selectedIndex = Math.min(cm.selectedIndex, Math.max(0, results.length - 1))
-  emitGlobalUI()
-  return c.body(null, 204)
-})
-
-// Command menu: navigate (arrow keys)
-app.post('/command-menu/nav', async (c) => {
-  const dir = c.req.header('X-Dir')
-  const cm = globalUIState.commandMenu
-  if (!cm || !cm.results.length) return c.body(null, 204)
-  const len = cm.results.length
-  if (dir === 'down') {
-    cm.selectedIndex = (cm.selectedIndex + 1) % len
-  } else if (dir === 'up') {
-    cm.selectedIndex = (cm.selectedIndex - 1 + len) % len
-  }
   emitGlobalUI()
   return c.body(null, 204)
 })
