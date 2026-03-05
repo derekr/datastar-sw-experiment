@@ -540,6 +540,24 @@ async function loadTimeTravelEvents(boardId) {
   return { allEvents: allEvents.map(e => upcast(e)), boardEvents }
 }
 
+// Load events scoped to a single card (for card detail history)
+async function loadCardEvents(cardId) {
+  const db = await dbPromise
+  const allEvents = await db.getAll('events')
+  const CARD_EVENT_TYPES = new Set([
+    'card.created', 'card.moved', 'card.deleted',
+    'card.titleUpdated', 'card.descriptionUpdated', 'card.labelUpdated',
+  ])
+  const cardEvents = []
+  for (const event of allEvents) {
+    const e = upcast(event)
+    if (CARD_EVENT_TYPES.has(e.type) && e.data?.id === cardId) {
+      cardEvents.push({ type: e.type, ts: e.ts, data: e.data })
+    }
+  }
+  return cardEvents
+}
+
 // ── Per-board tab presence (via clients API) ─────────────────────────────────
 async function getTabCount(boardId) {
   const clients = await self.clients.matchAll({ type: 'window' })
@@ -816,7 +834,7 @@ function LabelPicker({ cardId, currentLabel }) {
   )
 }
 
-function Card({ card, uiState }) {
+function Card({ card, uiState, boardId }) {
   const desc = card.description || ''
   const label = card.label || null
   const isReadOnly = uiState?.timeTravelPos >= 0
@@ -851,6 +869,13 @@ function Card({ card, uiState }) {
             data-on:click={`@post('${base()}cards/${card.id}/edit')`}
             title="Edit"
           >&#9998;</button>
+          {boardId && (
+            <a
+              class="card-expand-btn"
+              href={`${base()}boards/${boardId}/cards/${card.id}`}
+              title="Open"
+            >&#x2197;</a>
+          )}
           <button
             class="delete-btn"
             data-on:click__viewtransition={`@delete('${base()}cards/${card.id}')`}
@@ -978,7 +1003,7 @@ function ColumnSheet({ col, colIndex, columnCount, boardId }) {
   )
 }
 
-function Column({ col, cards, columnCount, uiState, columns }) {
+function Column({ col, cards, columnCount, uiState, columns, boardId }) {
   const colCards = cards
     .filter(c => c.columnId === col.id)
     .sort(cmpPosition)
@@ -1003,7 +1028,7 @@ function Column({ col, cards, columnCount, uiState, columns }) {
       <div class="cards-container" data-column-id={col.id}>
         {colCards.length === 0
           ? <p class="empty">No cards yet</p>
-          : colCards.map(card => <Card card={card} uiState={uiState} />)}
+          : colCards.map(card => <Card card={card} uiState={uiState} boardId={boardId} />)}
       </div>
       {!isReadOnly && !uiState?.selectionMode && (
         <form
@@ -1129,13 +1154,9 @@ function CommandMenu({ query, results }) {
 
   // Build click handler per result type
   function clickHandler(r) {
-    // Same-board card: close menu + highlight via server
-    if (r.type === 'card' && r.sameBoard) {
-      return `@post('${base()}command-menu/go', {headers:{'X-Board':'${r.boardId}','X-Card':'${r.id}'}})`
-    }
-    // Cross-board card: set highlight on target board, then navigate
-    if (r.type === 'card' && !r.sameBoard) {
-      return `fetch('${base()}command-menu/go-nav',{method:'POST',headers:{'X-Board':'${r.boardId}','X-Card':'${r.id}'}}).then(function(){window.location.href='${base()}boards/${r.boardId}'})`
+    // Card: close menu + navigate to card detail route
+    if (r.type === 'card') {
+      return `fetch('${base()}command-menu/close',{method:'POST'}).then(function(){window.location.href='${base()}boards/${r.boardId}/cards/${r.id}'})`
     }
     // Board navigation
     if (r.href) {
@@ -1278,7 +1299,7 @@ function Board({ board, columns, cards, uiState, tabCount, connStatus, commandMe
       )}
       <div class="columns">
         {columns.map(col => (
-          <Column col={col} cards={cards} columnCount={columns.length} uiState={uiState} columns={columns} />
+          <Column col={col} cards={cards} columnCount={columns.length} uiState={uiState} columns={columns} boardId={board.id} />
         ))}
       </div>
       {!isSelecting && !isTimeTraveling && (
@@ -1340,6 +1361,115 @@ function SelectionBar({ boardId, columns, selectedCount }) {
           data-on:click={`@post('${base()}boards/${boardId}/select-mode/cancel')`}
         >Cancel</button>
       </div>
+    </div>
+  )
+}
+
+function CardDetail({ card, column, columns, board, events, commandMenu }) {
+  const desc = card.description || ''
+  const label = card.label || null
+  const created = events.find(e => e.type === 'card.created')
+  const lastModified = events.length > 0 ? events[events.length - 1] : null
+
+  return (
+    <div id="card-detail" style={label ? `--card-label-color: ${LABEL_COLORS[label] || '#64748b'}` : ''}>
+      <div class="card-detail-header">
+        <a id="card-detail-back" href={`${base()}boards/${board.id}`} class="back-link">← {board.title}</a>
+      </div>
+      <div class="card-detail-body">
+        <div class="card-detail-main">
+          {label && <div class="card-detail-label-bar" style={`background: ${LABEL_COLORS[label]}`}></div>}
+          <form
+            class="card-detail-form"
+            data-on:submit__prevent={`@put('${base()}cards/${card.id}', {contentType: 'form'})`}
+          >
+            <input
+              id="card-detail-title"
+              name="title"
+              type="text"
+              value={card.title}
+              class="card-detail-title-input"
+              placeholder="Card title"
+              autocomplete="off"
+            />
+            <textarea
+              id="card-detail-desc"
+              name="description"
+              class="card-detail-desc-input"
+              placeholder="Add a description..."
+              rows="6"
+            >{desc}</textarea>
+            <div class="card-detail-form-actions">
+              <button type="submit" class="btn btn--primary">Save</button>
+            </div>
+          </form>
+
+          <div class="card-detail-section">
+            <h3 class="card-detail-section-title">Label</h3>
+            <LabelPicker cardId={card.id} currentLabel={label} />
+          </div>
+
+          <div class="card-detail-section">
+            <h3 class="card-detail-section-title">Column</h3>
+            <div class="card-detail-column-picker">
+              {columns.map(col => (
+                <button
+                  class={`card-detail-col-btn${col.id === card.columnId ? ' card-detail-col-btn--active' : ''}`}
+                  data-on:click={col.id !== card.columnId ? `@post('${base()}cards/${card.id}/move-to/${col.id}')` : 'void 0'}
+                  disabled={col.id === card.columnId}
+                >{col.title}</button>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <div class="card-detail-sidebar">
+          <div class="card-detail-section">
+            <h3 class="card-detail-section-title">Details</h3>
+            <dl class="card-detail-meta">
+              {created && <>
+                <dt>Created</dt>
+                <dd>{new Date(created.ts).toLocaleDateString()} {new Date(created.ts).toLocaleTimeString()}</dd>
+              </>}
+              {lastModified && lastModified !== created && <>
+                <dt>Last modified</dt>
+                <dd>{new Date(lastModified.ts).toLocaleDateString()} {new Date(lastModified.ts).toLocaleTimeString()}</dd>
+              </>}
+              <dt>Column</dt>
+              <dd>{column?.title || 'Unknown'}</dd>
+            </dl>
+          </div>
+
+          <div class="card-detail-section">
+            <h3 class="card-detail-section-title">History</h3>
+            {events.length > 0 ? (
+              <ul class="card-detail-history">
+                {[...events].reverse().map(e => (
+                  <li class="card-detail-history-item">
+                    <span class="card-detail-history-label">{eventLabel(e.type)}</span>
+                    <time class="card-detail-history-time">{new Date(e.ts).toLocaleDateString()} {new Date(e.ts).toLocaleTimeString()}</time>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p class="card-detail-empty">No history yet</p>
+            )}
+          </div>
+
+          <div class="card-detail-section card-detail-danger">
+            <button
+              class="btn btn--danger"
+              data-on:click={`if(confirm('Delete this card?')) { fetch('${base()}cards/${card.id}',{method:'DELETE'}).then(function(){window.location.href='${base()}boards/${board.id}'}) }`}
+            >Delete card</button>
+          </div>
+        </div>
+      </div>
+      {commandMenu && (
+        <CommandMenu
+          query={commandMenu.query}
+          results={commandMenu.results || []}
+        />
+      )}
     </div>
   )
 }
@@ -2479,6 +2609,210 @@ input:not(#_), textarea:not(#_), select:not(#_) { font-size: max(1rem, 16px); }
   animation-timing-function: cubic-bezier(0.2, 0, 0, 1);
 }
 ::view-transition-old(*) { animation: none; opacity: 0; }
+/* ── Card detail page ────────────────────────────── */
+
+#card-detail {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 16px;
+}
+.card-detail-header {
+  margin-bottom: 20px;
+}
+.card-detail-body {
+  display: grid;
+  grid-template-columns: 1fr 280px;
+  gap: 24px;
+}
+@media (max-width: 700px) {
+  .card-detail-body {
+    grid-template-columns: 1fr;
+  }
+}
+.card-detail-main {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+.card-detail-label-bar {
+  height: 4px;
+  border-radius: 4px;
+}
+.card-detail-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.card-detail-title-input {
+  font-size: 1.5rem;
+  font-weight: 700;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: #e2e8f0;
+  padding: 8px;
+  width: 100%;
+  box-sizing: border-box;
+}
+.card-detail-title-input:focus {
+  border-color: #3b82f6;
+  outline: none;
+  background: #1e293b;
+}
+.card-detail-desc-input {
+  background: #1e293b;
+  border: 1px solid #334155;
+  border-radius: 6px;
+  color: #e2e8f0;
+  padding: 10px;
+  font-size: 0.95rem;
+  resize: vertical;
+  min-height: 120px;
+  width: 100%;
+  box-sizing: border-box;
+  font-family: inherit;
+}
+.card-detail-desc-input:focus {
+  border-color: #3b82f6;
+  outline: none;
+}
+.card-detail-form-actions {
+  display: flex;
+  gap: 8px;
+}
+.card-detail-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.card-detail-section-title {
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: #64748b;
+  letter-spacing: 0.05em;
+  margin: 0;
+}
+.card-detail-column-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.card-detail-col-btn {
+  padding: 6px 14px;
+  border-radius: 6px;
+  border: 1px solid #334155;
+  background: #1e293b;
+  color: #e2e8f0;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+.card-detail-col-btn--active {
+  background: #3b82f6;
+  border-color: #3b82f6;
+  color: #fff;
+  cursor: default;
+}
+.card-detail-col-btn:not(:disabled):hover {
+  background: #334155;
+}
+
+/* Sidebar */
+.card-detail-sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+.card-detail-meta {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 12px;
+  font-size: 0.85rem;
+  margin: 0;
+}
+.card-detail-meta dt {
+  color: #64748b;
+}
+.card-detail-meta dd {
+  margin: 0;
+  color: #cbd5e1;
+}
+.card-detail-history {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 300px;
+  overflow-y: auto;
+}
+.card-detail-history-item {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 6px 8px;
+  background: #1e293b;
+  border-radius: 4px;
+  font-size: 0.8rem;
+}
+.card-detail-history-label {
+  color: #e2e8f0;
+}
+.card-detail-history-time {
+  color: #64748b;
+  font-size: 0.75rem;
+}
+.card-detail-empty {
+  color: #64748b;
+  font-size: 0.85rem;
+}
+.card-detail-danger {
+  padding-top: 12px;
+  border-top: 1px solid #334155;
+}
+
+/* Expand button on board cards */
+.card-expand-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: none;
+  background: none;
+  color: #64748b;
+  cursor: pointer;
+  border-radius: 4px;
+  font-size: 0.85rem;
+  text-decoration: none;
+  line-height: 1;
+}
+.card-expand-btn:hover {
+  background: #334155;
+  color: #e2e8f0;
+}
+
+/* Generic button styles */
+.btn {
+  padding: 8px 18px;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  font-weight: 500;
+}
+.btn--primary {
+  background: #3b82f6;
+  color: #fff;
+}
+.btn--primary:hover { background: #2563eb; }
+.btn--danger {
+  background: #ef4444;
+  color: #fff;
+}
+.btn--danger:hover { background: #dc2626; }
+
 ::view-transition-new(*) { animation: none; }
 /* Columns above default during view transitions so moving column renders on top */
 ::view-transition-group(*.col) { z-index: 50; }
@@ -2489,7 +2823,8 @@ body[style*="cursor: grabbing"] * { cursor: grabbing !important; }
 
 function Shell({ path, children }) {
   const routePath = path || '/'
-  const isBoardPage = routePath.startsWith('/boards/')
+  const isCardPage = /^\/boards\/[^/]+\/cards\//.test(routePath)
+  const isBoardPage = routePath.startsWith('/boards/') && !isCardPage
   // Client-side SSE URL needs the base path so the browser hits the SW scope.
   const sseUrl = base() + routePath.replace(/^\//, '')
   return (
@@ -3049,6 +3384,89 @@ app.get('/boards/:boardId', async (c) => {
       {data ? <Board board={data.board} columns={data.columns} cards={data.cards} uiState={ui} tabCount={0} connStatus={connStatus} commandMenu={globalUIState.commandMenu} /> : <p>Board not found</p>}
     </Shell>
   ).toString())
+})
+
+// ── Card detail ──────────────────────────────────────────────────────────────
+
+app.get('/boards/:boardId/cards/:cardId', async (c) => {
+  await initialize()
+  const boardId = c.req.param('boardId')
+  const cardId = c.req.param('cardId')
+
+  if (c.req.header('Datastar-Request') === 'true') {
+    return streamSSE(c, async (stream) => {
+      const pushCard = async (selector, mode) => {
+        const db = await dbPromise
+        const card = await db.get('cards', cardId)
+        if (!card) return
+        const board = await db.get('boards', boardId)
+        if (!board) return
+        const columns = (await db.getAllFromIndex('columns', 'byBoard', boardId)).sort(cmpPosition)
+        const col = columns.find(c => c.id === card.columnId)
+        const events = await loadCardEvents(cardId)
+        await stream.writeSSE(dsePatch(selector,
+          <CardDetail card={card} column={col} columns={columns} board={board} events={events} commandMenu={globalUIState.commandMenu} />,
+          mode
+        ))
+      }
+
+      const topic = `board:${boardId}:changed`
+      const handler = () => pushCard('#card-detail', 'outer')
+      bus.addEventListener(topic, handler)
+
+      const uiTopic = `board:${boardId}:ui`
+      const uiHandler = () => pushCard('#card-detail', 'outer')
+      bus.addEventListener(uiTopic, uiHandler)
+
+      const globalUIHandler = () => pushCard('#card-detail', 'outer')
+      bus.addEventListener('global:ui', globalUIHandler)
+
+      stream.onAbort(() => {
+        bus.removeEventListener(topic, handler)
+        bus.removeEventListener(uiTopic, uiHandler)
+        bus.removeEventListener('global:ui', globalUIHandler)
+      })
+
+      await pushCard('#app', 'inner')
+      while (!stream.closed) { await stream.sleep(30000) }
+    })
+  }
+
+  const db = await dbPromise
+  const card = await db.get('cards', cardId)
+  const board = await db.get('boards', boardId)
+  if (!card || !board) {
+    return c.html('<!DOCTYPE html>' + (
+      <Shell path={`/boards/${boardId}`}><p>Card not found</p></Shell>
+    ).toString())
+  }
+  const columns = (await db.getAllFromIndex('columns', 'byBoard', boardId)).sort(cmpPosition)
+  const col = columns.find(co => co.id === card.columnId)
+  const events = await loadCardEvents(cardId)
+  return c.html('<!DOCTYPE html>' + (
+    <Shell path={`/boards/${boardId}/cards/${cardId}`}>
+      <CardDetail card={card} column={col} columns={columns} board={board} events={events} commandMenu={globalUIState.commandMenu} />
+    </Shell>
+  ).toString())
+})
+
+// Command: move card to specific column (from card detail)
+app.post('/cards/:cardId/move-to/:columnId', async (c) => {
+  const cardId = c.req.param('cardId')
+  const columnId = c.req.param('columnId')
+  const db = await dbPromise
+  const card = await db.get('cards', cardId)
+  if (!card || card.columnId === columnId) return c.body(null, 204)
+  const boardId = await boardIdFromCard(cardId)
+  // Place at end of target column
+  const colCards = (await db.getAllFromIndex('cards', 'byColumn', columnId)).sort(cmpPosition)
+  const lastPos = colCards.length > 0 ? colCards[colCards.length - 1].position : null
+  await appendEventsWithUndo([createEvent('card.moved', {
+    id: cardId,
+    columnId,
+    position: generateKeyBetween(lastPos, null),
+  })], boardId)
+  return c.body(null, 204)
 })
 
 // Command: create column (board-scoped)
@@ -3697,50 +4115,6 @@ app.post('/command-menu/search', async (c) => {
   cm.query = body.query || ''
   cm.results = results
   emitGlobalUI()
-  return c.body(null, 204)
-})
-
-// Command menu: go to same-board card (close + open for editing)
-app.post('/command-menu/go', async (c) => {
-  const boardId = c.req.header('X-Board')
-  const cardId = c.req.header('X-Card')
-  globalUIState.commandMenu = null
-  emitGlobalUI()
-  if (boardId && cardId) {
-    const ui = getUIState(boardId)
-    ui.editingCard = cardId
-    ui.highlightCard = cardId // for scroll-into-view
-    emitUI(boardId)
-    setTimeout(() => {
-      const u = getUIState(boardId)
-      if (u.highlightCard === cardId) {
-        u.highlightCard = null
-        emitUI(boardId)
-      }
-    }, 3000)
-  }
-  return c.body(null, 204)
-})
-
-// Command menu: go to cross-board card (close + set edit state for post-navigation)
-app.post('/command-menu/go-nav', async (c) => {
-  const boardId = c.req.header('X-Board')
-  const cardId = c.req.header('X-Card')
-  globalUIState.commandMenu = null
-  emitGlobalUI()
-  if (boardId && cardId) {
-    // Pre-set edit + highlight so when the board page loads, the card opens for editing
-    const ui = getUIState(boardId)
-    ui.editingCard = cardId
-    ui.highlightCard = cardId
-    setTimeout(() => {
-      const u = getUIState(boardId)
-      if (u.highlightCard === cardId) {
-        u.highlightCard = null
-        emitUI(boardId)
-      }
-    }, 3000)
-  }
   return c.body(null, 204)
 })
 
