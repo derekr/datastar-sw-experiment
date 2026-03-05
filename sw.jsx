@@ -119,7 +119,6 @@ const ALLOWED_EVENT_TYPES = new Set(Object.keys(EVENT_VERSIONS))
 // --- Docs topics ---
 
 const DOCS_TOPICS = [
-  { slug: 'overview',       title: 'The Big Picture',                section: 'core' },
   { slug: 'event-sourcing', title: 'Event Sourcing & CQRS',          section: 'core' },
   { slug: 'sse-morphing',   title: 'SSE & Server-Sent Morphing',     section: 'core' },
   { slug: 'signals',        title: 'Signals & Server-Owned UI State', section: 'core' },
@@ -3658,6 +3657,66 @@ body {
   font-style: italic;
 }
 
+/* ── Content sections ────────────────────────────── */
+
+.docs-section {
+  margin-bottom: var(--size-2);
+}
+.docs-section h2 {
+  font-size: var(--font-size-1);
+  font-weight: var(--font-weight-semi-bold);
+  margin-bottom: var(--size--1);
+}
+.docs-section h3 {
+  font-size: var(--font-size-0);
+  font-weight: var(--font-weight-semi-bold);
+  margin-top: var(--size-1);
+  margin-bottom: var(--size--2);
+}
+.docs-section p {
+  margin-bottom: var(--size--1);
+  color: var(--neutral-10);
+  line-height: 1.7;
+}
+.docs-section code {
+  background: var(--neutral-3);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 0.9em;
+}
+
+.docs-flow-list {
+  list-style: none;
+  counter-reset: flow;
+  margin: var(--size-0) 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--size--1);
+}
+.docs-flow-list li {
+  counter-increment: flow;
+  position: relative;
+  padding-left: 2.5em;
+  line-height: 1.7;
+  color: var(--neutral-10);
+}
+.docs-flow-list li::before {
+  content: counter(flow);
+  position: absolute;
+  left: 0;
+  top: 0.15em;
+  width: 1.8em;
+  height: 1.8em;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in oklch, var(--primary-7) 15%, transparent);
+  color: var(--primary-9);
+  font-size: var(--font-size--2);
+  font-weight: var(--font-weight-bold);
+  border-radius: 50%;
+}
+
 /* ── TOC grid ────────────────────────────────────── */
 
 .docs-toc-section { margin-bottom: var(--size-2); }
@@ -4052,7 +4111,32 @@ function DocsIndexContent({ commandMenu }) {
         <p class="docs-hero-note">This is a real app — the docs you're reading are served by the same service worker that runs the kanban board. Interactive examples are hooked up to the live event store.</p>
       </div>
 
-      <section class="docs-toc-section">
+      <section class="docs-section" id="big-picture">
+        <h2>The Big Picture</h2>
+        <p>Most web apps split work between a client-side framework and a remote server. This app does something different: the <strong>service worker is the server</strong>. It runs Hono for routing, renders JSX into HTML, persists data to IndexedDB, and pushes UI updates over SSE. The browser tab is just a thin shell that receives HTML and morphs it into the DOM.</p>
+
+        <p>Every user action follows the same loop:</p>
+
+        <ol class="docs-flow-list" id="flow-steps">
+          <li><strong>Client sends an action</strong> — a button click, form submit, or drag-drop fires a <code>POST</code>/<code>PUT</code>/<code>DELETE</code> to a Hono route inside the service worker.</li>
+          <li><strong>SW writes event(s)</strong> — the route handler appends one or more immutable events to the IndexedDB event log. Events are facts: <code>card.created</code>, <code>column.moved</code>, <code>card.labelChanged</code>.</li>
+          <li><strong>SW rebuilds projection</strong> — the event is applied to an in-memory projection (the current state of boards, columns, cards). This is the "read model" in CQRS terms.</li>
+          <li><strong>Bus notifies SSE streams</strong> — the route emits a topic on the in-memory event bus (<code>board:&lt;id&gt;</code>). Every open SSE connection subscribed to that topic wakes up.</li>
+          <li><strong>SSE pushes a full HTML morph</strong> — each SSE handler reads the latest projection, renders the entire board as JSX, and sends it as a Datastar <code>datastar-patch-elements</code> event.</li>
+          <li><strong>Datastar morphs the DOM</strong> — the client-side Datastar library receives the HTML and uses Idiomorph to efficiently diff and patch the live DOM. No virtual DOM, no hydration — just HTML in, DOM out.</li>
+        </ol>
+
+        <p>That's the whole architecture. No REST API returning JSON. No client-side state management. No <code>useState</code> or <code>createSignal</code>. The server owns the state, renders the HTML, and pushes it to every connected tab.</p>
+
+        <h3>Why this works</h3>
+        <p>This pattern — sometimes called "HTML-over-the-wire" — trades client-side complexity for server-side simplicity. The server already knows the full state, so it can render exactly the right HTML. The client doesn't need to reconcile, cache, or invalidate anything. It just displays what it receives.</p>
+        <p>Datastar makes this practical: it manages SSE connections, applies morphs via Idiomorph (which preserves focus, scroll position, and CSS transitions), and provides a lightweight signal system for the small amount of client-to-server communication that forms need.</p>
+
+        <h3>What makes this app unusual</h3>
+        <p>The "server" is a service worker — it runs in the browser, not on a remote machine. That means zero network latency, offline-by-default, and the entire app is self-contained in a single tab. But the Datastar patterns are identical to what you'd use with a real backend. The SW is an implementation detail; the architecture is the lesson.</p>
+      </section>
+
+      <section class="docs-toc-section" id="topics">
         <h2>Core Concepts</h2>
         <p class="docs-toc-intro">These are the Datastar patterns that make this app tick.</p>
         <div class="docs-toc-grid">
