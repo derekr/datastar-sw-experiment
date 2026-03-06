@@ -119,15 +119,15 @@ const ALLOWED_EVENT_TYPES = new Set(Object.keys(EVENT_VERSIONS))
 // --- Docs topics ---
 
 const DOCS_TOPICS = [
-  { slug: 'event-sourcing', title: 'Event Sourcing & CQRS',          section: 'core' },
-  { slug: 'fat-morphing',   title: 'SSE & Fat Morphing',              section: 'core' },
-  { slug: 'signals',        title: 'Signals & Server-Owned UI State', section: 'core' },
-  { slug: 'hypermedia',     title: 'Hypermedia — The Missing Pattern', section: 'core' },
-  { slug: 'mpa-navigations', title: 'MPA Navigations',                section: 'bonus' },
-  { slug: 'service-worker', title: 'Service Worker as Server',       section: 'bonus' },
-  { slug: 'indexeddb',      title: 'IndexedDB: Keeping It Light',    section: 'bonus' },
-  { slug: 'fractional-indexing', title: 'Fractional Indexing',        section: 'bonus' },
-  { slug: 'local-first',   title: 'Local-First in the Browser',     section: 'bonus' },
+  { slug: 'core/event-sourcing', title: 'Event Sourcing & CQRS',          section: 'core' },
+  { slug: 'core/sse-fat-morph', title: 'SSE & Fat Morphing',              section: 'core' },
+  { slug: 'core/signals',       title: 'Signals & Server-Owned UI State', section: 'core' },
+  { slug: 'core/hypermedia',    title: 'Hypermedia — The Missing Pattern', section: 'core' },
+  { slug: 'bonus/mpa',         title: 'MPA Navigations',                section: 'bonus' },
+  { slug: 'bonus/sw',          title: 'Service Worker as Server',         section: 'bonus' },
+  { slug: 'bonus/indexeddb',   title: 'IndexedDB: Keeping It Light',    section: 'bonus' },
+  { slug: 'bonus/fractional',   title: 'Fractional Indexing',            section: 'bonus' },
+  { slug: 'bonus/local-first',  title: 'Local-First in the Browser',    section: 'bonus' },
 ]
 
 const LABEL_COLORS = {
@@ -5013,15 +5013,15 @@ if (import.meta.hot) {
 // Topic content lookup — returns topic-specific component or falls back to stub
 function DocsTopicContent({ topic, commandMenu }) {
   switch (topic.slug) {
-    case 'event-sourcing':
+    case 'core/event-sourcing':
       return <DocsEventSourcingContent topic={topic} commandMenu={commandMenu} />
-    case 'fat-morphing':
+    case 'core/sse-fat-morph':
       return <DocsFatMorphingContent topic={topic} commandMenu={commandMenu} />
-    case 'signals':
+    case 'core/signals':
       return <DocsSignalsContent topic={topic} commandMenu={commandMenu} />
-    case 'hypermedia':
+    case 'core/hypermedia':
       return <DocsHypermediaContent topic={topic} commandMenu={commandMenu} />
-    case 'service-worker':
+    case 'bonus/sw':
       return <DocsServiceWorkerContent topic={topic} commandMenu={commandMenu} />
     default:
       return <DocsTopicStubContent topic={topic} commandMenu={commandMenu} />
@@ -6346,7 +6346,7 @@ app.get('/docs', (c) => {
   return c.html('<!DOCTYPE html>' + (<DocsPage sseUrl="docs"><DocsIndexContent commandMenu={globalUIState.commandMenu} /></DocsPage>).toString())
 })
 
-app.get('/docs/:slug', (c) => {
+app.get('/docs/:slug{.*}', (c) => {
   const slug = c.req.param('slug')
   const topic = DOCS_TOPICS.find(t => t.slug === slug)
   if (!topic) return c.notFound()
