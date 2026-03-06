@@ -1,11 +1,11 @@
 ---
 # datastar_sw-akqe
 title: 'Docs (bonus): IndexedDB — Keeping the DB Layer Light'
-status: todo
+status: in-progress
 type: task
 priority: normal
 created_at: 2026-03-05T20:48:25Z
-updated_at: 2026-03-05T20:48:40Z
+updated_at: 2026-03-06T00:55:34Z
 parent: datastar_sw-9bz9
 blocked_by:
     - datastar_sw-yzrf

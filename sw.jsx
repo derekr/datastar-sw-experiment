@@ -4950,6 +4950,76 @@ function DocsMpaContent({ topic, commandMenu }) {
   )
 }
 
+function DocsIndexedDbContent({ topic, commandMenu }) {
+  return (
+    <DocsInner topic={topic} commandMenu={commandMenu}>
+      <h1>{topic.title}</h1>
+
+      <section class="docs-section">
+        <p>This app uses raw IndexedDB with thin helpers — no ORM, no abstraction layer, no migration framework. It's intentionally minimal to show the pattern clearly. This bonus section explains why and how.</p>
+      </section>
+
+      <section class="docs-section">
+        <h2>The stores</h2>
+        <p>There are only <strong>five</strong> object stores:</p>
+        <ul class="docs-list">
+          <li><code>events</code> — the immutable event log (source of truth)</li>
+          <li><code>boards</code> — board projections</li>
+          <li><code>columns</code> — column projections</li>
+          <li><code>cards</code> — card projections</li>
+          <li><code>meta</code> — snapshots and metadata</li>
+        </ul>
+        <p>Each projection store has indexes for common queries: <code>cards.byColumn</code>, <code>columns.byBoard</code>, <code>events.byId</code>.</p>
+      </section>
+
+      <section class="docs-section">
+        <h2>Why raw IndexedDB?</h2>
+        <ul class="docs-list">
+          <li><strong>No extra dependencies</strong> — just <code>idb</code> for promise-based wrappers around the callback API.</li>
+          <li><strong>Structured cloning</strong> — JavaScript objects serialize automatically. No <code>JSON.stringify</code> needed.</li>
+          <li><strong>Transactions</strong> — atomicity comes free. Read-modify-write in a transaction; it all succeeds or fails together.</li>
+          <li><strong>No migrations needed</strong> — events are the schema. If you can append events, the format doesn't matter.</li>
+        </ul>
+      </section>
+
+      <section class="docs-section">
+        <h2>Contrast with heavier options</h2>
+        <table class="docs-table">
+          <thead>
+            <tr><th>Option</th><th>Tradeoff</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Dexie.js</td><td>Nice API, but adds bundle size and another abstraction</td></tr>
+            <tr><td>PGlite (SQLite in WASM)</td><td>Powerful queries, but heavy (~3MB) and overengineered for this</td></tr>
+            <tr><td>OPFS</td><td>File-based, not ideal for structured data</td></tr>
+            <tr><td>Raw IndexedDB + idb</td><td>~3KB, direct access, no abstraction leak</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section class="docs-section">
+        <h2>Reading and writing</h2>
+        <p>Writing appends an event and updates projections in a single transaction:</p>
+        <pre><code>{`const tx = db.transaction(['events', 'boards', 'columns', 'cards'], 'readwrite')
+await tx.objectStore('events').add(event)
+await tx.objectStore('boards').put(projection)
+await tx.done`}</code></pre>
+        <p>Reading is straightforward:</p>
+        <pre><code>{`const db = await dbPromise
+const cards = await db.getAllFromIndex('cards', 'byColumn', columnId)`}</code></pre>
+      </section>
+
+      <section class="docs-section">
+        <h2>Snapshots for fast startup</h2>
+        <p>On service worker startup, replaying thousands of events is slow. This app periodically saves a snapshot to <code>meta</code> — a serialized projection. On load, it reads the snapshot and replays only events after the snapshot sequence.</p>
+        <p>This keeps startup fast even with thousands of events.</p>
+      </section>
+
+      <DocsPager topic={topic} />
+    </DocsInner>
+  )
+}
+
 function DocsServiceWorkerContent({ topic, commandMenu }) {
   return (
     <DocsInner topic={topic} commandMenu={commandMenu}>
@@ -5111,6 +5181,8 @@ function DocsTopicContent({ topic, commandMenu }) {
       return <DocsMpaContent topic={topic} commandMenu={commandMenu} />
     case 'bonus/sw':
       return <DocsServiceWorkerContent topic={topic} commandMenu={commandMenu} />
+    case 'bonus/indexeddb':
+      return <DocsIndexedDbContent topic={topic} commandMenu={commandMenu} />
     default:
       return <DocsTopicStubContent topic={topic} commandMenu={commandMenu} />
   }
