@@ -3803,6 +3803,100 @@ body {
   font-size: var(--font-size--2);
 }
 
+/* ── Interactive Visualizations ───────────────────────── */
+
+.docs-viz {
+  border: 1px solid var(--neutral-4);
+  border-radius: var(--radius-2);
+  padding: var(--size-1);
+  margin: var(--size-1) 0;
+  background: var(--surface-1);
+}
+
+.docs-viz-flow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--size--1);
+  flex-wrap: wrap;
+}
+
+.docs-viz-node {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: var(--size--1);
+  border-radius: var(--radius-1);
+  background: var(--surface-2);
+  border: 1px solid var(--neutral-4);
+  min-width: 80px;
+}
+
+.docs-viz-node-title {
+  font-weight: var(--font-weight-semi-bold);
+  font-size: var(--font-size--2);
+}
+
+.docs-viz-node-desc {
+  font-size: var(--font-size--2);
+  color: var(--neutral-8);
+}
+
+.docs-viz-arrow {
+  color: var(--primary-6);
+  font-size: var(--font-size-1);
+}
+
+.docs-viz-zoom {
+  margin-top: var(--size--1);
+  padding-top: var(--size--1);
+  border-top: 1px solid var(--neutral-4);
+}
+
+.docs-viz-zoom summary {
+  font-size: var(--font-size--1);
+  color: var(--neutral-8);
+  cursor: pointer;
+  user-select: none;
+}
+
+.docs-viz-zoom[open] summary {
+  margin-bottom: var(--size--1);
+}
+
+.docs-viz-zoom-content {
+  padding: var(--size--1);
+  background: var(--surface-3);
+  border-radius: var(--radius-1);
+  font-size: var(--font-size--1);
+}
+
+.docs-viz-step {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--size--1);
+  margin-bottom: var(--size--2);
+}
+
+.docs-viz-step-num {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--primary-6);
+  color: var(--primary-6-on);
+  font-size: var(--font-size--2);
+  font-weight: var(--font-weight-semi-bold);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.docs-viz-step-content {
+  flex: 1;
+}
+
 /* ── TOC grid ────────────────────────────────────── */
 
 .docs-toc-section { margin-bottom: var(--size-2); }
@@ -4373,6 +4467,21 @@ return c.body(null, 204)`}</code></pre>
           <li><strong>Read side:</strong> SSE handlers read from the projection (the derived state) and render full HTML. They never write events.</li>
         </ul>
         <p>The projection is the "read model" — three database tables (<code>boards</code>, <code>columns</code>, <code>cards</code>) that hold the current state. When an event is appended, <code>applyEvent</code> updates these tables as a side effect of the write. The SSE handlers just read whatever's there.</p>
+
+        <details class="docs-viz">
+          <summary>View the data flow</summary>
+          <div class="docs-viz-flow">
+            <div class="docs-viz-node"><span class="docs-viz-node-title">Client</span><span class="docs-viz-node-desc">POST /cards</span></div>
+            <span class="docs-viz-arrow">→</span>
+            <div class="docs-viz-node"><span class="docs-viz-node-title">Server</span><span class="docs-viz-node-desc">write event</span></div>
+            <span class="docs-viz-arrow">→</span>
+            <div class="docs-viz-node"><span class="docs-viz-node-title">IDB</span><span class="docs-viz-node-desc">events + projection</span></div>
+            <span class="docs-viz-arrow">→</span>
+            <div class="docs-viz-node"><span class="docs-viz-node-title">SSE</span><span class="docs-viz-node-desc">push morph</span></div>
+            <span class="docs-viz-arrow">→</span>
+            <div class="docs-viz-node"><span class="docs-viz-node-title">Browser</span><span class="docs-viz-node-desc">update UI</span></div>
+          </div>
+        </details>
       </section>
 
       <section class="docs-section">
