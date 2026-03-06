@@ -4461,6 +4461,7 @@ data: elements <div id="board" class="board">...</div>`}</code></pre>
         <p>The <code>selector</code> identifies which DOM element to update. The <code>mode</code> controls how — <code>outer</code> replaces the element itself (including its tag), <code>inner</code> replaces only its children. The <code>elements</code> field contains the full HTML to morph in.</p>
         <p>The selector can target anything: <code>body</code> is the happy path for full-page morphs, or specific containers like <code>#app</code>, <code>#header</code>, <code>#board</code>. You can also morph individual elements like a status indicator or pager. The goal is simple and predictable fat morphs.</p>
         <p>Beyond HTML morphs, you can also <strong>morph signals</strong> for fine-grained updates — changing a single value without touching the DOM. This is useful for status icons, badges, or driving client-side heavy things like 3D scenes.</p>
+        <p>This approach — sending full HTML over SSE with Brotli compression — is what makes fat morphs production-viable. A 15KB morph compresses to ~3KB, making it competitive with delta/diff approaches. See <a href={base() + 'docs/bonus/brotli'}>Brotli Compression</a> for details.</p>
         <p>On the server, a helper function handles the formatting:</p>
         <pre><code>{`function dsePatch(selector, jsx, mode = 'outer', opts) {
   return {
