@@ -4663,20 +4663,29 @@ function getUIState(boardId) {
       </section>
 
       <section class="docs-section">
-        <h2>Forms: the one place clients send data</h2>
-        <p>When the client needs to send actual data to the server — a card title, a description, a search query — it uses standard HTML forms with Datastar's <code>{`{contentType: 'form'}`}</code> option:</p>
-        <pre><code>{`<!-- New card form -->
+        <h2>Forms: sending data to the server</h2>
+        <p>When the client needs to send structured data to the server — a card title, a description, a search query — Datastar binds inputs to signals and submits them as JSON:</p>
+        <pre><code>{`<!-- Bind inputs to signals -->
+<input data-bind="title" placeholder="Title" />
+<textarea data-bind="description" placeholder="Description" />
+
+<!-- On submit, all signals are sent as JSON -->
+<form data-on:submit__prevent="@post('/cards', {contentType: 'json'})">
+  <button type="submit">Create</button>
+</form>`}</code></pre>
+        <p>Instead of parsing <code>FormData</code> on the server, you receive structured JSON directly: <code>{`{ title: "...", description: "..." }`}</code>. This makes nested data, arrays, and complex shapes easier to work with than flat form fields.</p>
+        <p>There are only <strong>seven</strong> form submissions in the entire app: create card, edit card (inline), edit card (detail page), create column, create board, rename board, and command menu search.</p>
+      </section>
+
+      <section class="docs-section">
+        <h2>If you really love HTML forms</h2>
+        <p>Alternatively, you can use standard HTML forms with <code>{`{contentType: 'form'}`}</code>:</p>
+        <pre><code>{`<!-- Standard HTML form -->
 <form data-on:submit__prevent__viewtransition=
   {\`@post('/columns/\${col.id}/cards', {contentType: 'form'}); evt.target.reset()\`}>
-  <input name="title" placeholder="Add a card" autocomplete="off" />
-</form>
-
-<!-- Board rename form -->
-<form data-on:submit__prevent={\`@put('/boards/\${board.id}', {contentType: 'form'})\`}>
-  <input name="title" type="text" value={board.title} />
+  <input name="title" placeholder="Add a card" />
 </form>`}</code></pre>
-        <p>This sends a standard URL-encoded form body — <code>title=My+Card</code> — which the server parses with <code>c.req.parseBody()</code>. No signals, no two-way binding, no controlled inputs. The form is native HTML; Datastar just intercepts the submit.</p>
-        <p>There are only <strong>seven</strong> form submissions in the entire app: create card, edit card (inline), edit card (detail page), create column, create board, rename board, and command menu search.</p>
+        <p>This sends a URL-encoded form body — <code>title=My+Card</code> — which the server parses with <code>c.req.parseBody()</code>. Works fine for simple flat data, but gets awkward with nested structures.</p>
       </section>
 
       <section class="docs-section">
