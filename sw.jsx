@@ -5020,6 +5020,72 @@ const cards = await db.getAllFromIndex('cards', 'byColumn', columnId)`}</code></
   )
 }
 
+function DocsFractionalIndexingContent({ topic, commandMenu }) {
+  return (
+    <DocsInner topic={topic} commandMenu={commandMenu}>
+      <h1>{topic.title}</h1>
+
+      <section class="docs-section">
+        <p>Not Datastar-specific — this is a general technique for ordered lists. When you drag a card to a new position, you need to store its order somehow. The naive approach uses integers: position 0, 1, 2, 3... But every insert or move requires renumbering everything after it.</p>
+        <p>Fractional indexing solves this: positions are strings that sort alphabetically but leave room between neighbors. You can insert between any two items without renumbering.</p>
+      </section>
+
+      <section class="docs-section">
+        <h2>How it works</h2>
+        <p>Each position is a string key. The keys sort in lexicographic order (like alphabetical, but for strings):</p>
+        <pre><code>{`// Initial cards at positions:
+card1: "a"
+card2: "b"
+card3: "c"
+
+// Insert between card1 and card2:
+generateKeyBetween("a", "b")  // → "aV"
+
+// Insert at the start:
+generateKeyBetween(null, "a")  // → "]"
+
+// Insert at the end:
+generateKeyBetween("c", null)  // → "c0"`}</code></pre>
+        <p>The library generates keys that always fit between any two existing keys. You never need to update other items.</p>
+      </section>
+
+      <section class="docs-section">
+        <h2>The siblings array</h2>
+        <p>When moving an item, you pass the <em>sorted siblings</em> (excluding the item being moved) and the drop index:</p>
+        <pre><code>{`function positionForIndex(dropIndex, sortedSiblings) {
+  const before = dropIndex > 0 ? sortedSiblings[dropIndex - 1].position : null
+  const after = dropIndex < sortedSiblings.length ? sortedSiblings[dropIndex].position : null
+  return generateKeyBetween(before, after)
+}`}</code></pre>
+        <p>The siblings array excludes the moved item because you're computing where it <em>goes</em>, not where it <em>was</em>.</p>
+      </section>
+
+      <section class="docs-section">
+        <h2>Why not integers?</h2>
+        <p>With integers, moving item at position 2 to position 0 means:</p>
+        <pre><code>{`// Old: [0, 1, 2, 3]
+// Move item 2 to position 0:
+// Need to renumber: [0, 2, 3, 4] or [0, 1, 2, 3] → [0, -1, 1, 2] → ...`}</code></pre>
+        <p>With fractional indexing:</p>
+        <pre><code>{`// Old: ["a", "b", "c", "d"]
+// Move item "c" to position 0:
+// generateKeyBetween(null, "a") → "]"
+// No other items changed.`}</code></pre>
+      </section>
+
+      <section class="docs-section">
+        <h2>In this app</h2>
+        <p>Cards and columns both use fractional indexing for position. When you drag a card, <code>eg-kanban.js</code> calculates the visual drop index and sends it to the server. The server converts it to a fractional key:</p>
+        <pre><code>{`// Server receives dropIndex=2, siblings=[{position:"a"},{position:"b"},{position:"c"}]
+// Computes: generateKeyBetween("b", "c") → "bV"`}</code></pre>
+        <p>The event stores <code>position: "bV"</code>. Future inserts between any two items work without touching other positions.</p>
+      </section>
+
+      <DocsPager topic={topic} />
+    </DocsInner>
+  )
+}
+
 function DocsServiceWorkerContent({ topic, commandMenu }) {
   return (
     <DocsInner topic={topic} commandMenu={commandMenu}>
@@ -5183,6 +5249,8 @@ function DocsTopicContent({ topic, commandMenu }) {
       return <DocsServiceWorkerContent topic={topic} commandMenu={commandMenu} />
     case 'bonus/indexeddb':
       return <DocsIndexedDbContent topic={topic} commandMenu={commandMenu} />
+    case 'bonus/fractional':
+      return <DocsFractionalIndexingContent topic={topic} commandMenu={commandMenu} />
     default:
       return <DocsTopicStubContent topic={topic} commandMenu={commandMenu} />
   }
