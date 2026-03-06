@@ -298,10 +298,10 @@ body {
 
 .docs-viz {
   border: 1px solid var(--neutral-4);
-  border-radius: var(--radius-2);
+  border-radius: var(--border-radius-2);
   padding: var(--size-1);
   margin: var(--size-1) 0;
-  background: var(--surface-1);
+  background: var(--neutral-2);
 }
 
 .docs-viz-flow {
@@ -318,8 +318,8 @@ body {
   align-items: center;
   gap: 4px;
   padding: var(--size--1);
-  border-radius: var(--radius-1);
-  background: var(--surface-2);
+  border-radius: var(--border-radius-1);
+  background: var(--neutral-3);
   border: 1px solid var(--neutral-4);
   min-width: 80px;
 }
@@ -358,8 +358,8 @@ body {
 
 .docs-viz-zoom-content {
   padding: var(--size--1);
-  background: var(--surface-3);
-  border-radius: var(--radius-1);
+  background: var(--neutral-3);
+  border-radius: var(--border-radius-1);
   font-size: var(--font-size--1);
 }
 

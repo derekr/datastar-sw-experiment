@@ -35,7 +35,7 @@ export function CommandMenu({ query, results }) {
     }
     // Action: close menu + execute
     if (r.actionUrl) {
-      return `fetch('${base()}command-menu/close',{method:'POST'}); fetch('${r.actionUrl}',{method:'POST'})`
+      return `fetch('${base()}command-menu/close',{method:'POST'}).then(function(){fetch('${r.actionUrl}',{method:'POST'})})`
     }
     return `@post('${base()}command-menu/close')`
   }

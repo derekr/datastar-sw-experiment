@@ -5,7 +5,7 @@ import { raw } from 'hono/html'
 
 export function BoardCard({ board }) {
   return (
-    <div class="board-card" style={`view-transition-name: board-${board.id}`}>
+    <div id={`board-${board.id}`} class="board-card" style={`view-transition-name: board-${board.id}`}>
       <a class="board-card-link" href={`${base()}boards/${board.id}`}>
         <h2>{board.title}</h2>
         <div class="board-meta">

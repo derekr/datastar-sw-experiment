@@ -9,7 +9,7 @@ import { MAX_IMPORT_EVENTS, ALLOWED_EVENT_TYPES, LABEL_COLORS, DOCS_TOPICS } fro
 import { compressToBase64url, decompressFromBase64url } from './lib/compression.js'
 import { createEvent, applyEvent, appendEvents, appendEvent, boardIdForEvent, annotateEventsWithBoardId } from './lib/events.js'
 import { appendEventsWithUndo, undoStacks, redoStacks, getStack } from './lib/undo.js'
-import { boardUIState, globalUIState, getUIState, clearUIState, emitGlobalUI, emitUI } from './lib/ui-state.js'
+import { boardUIState, globalUIState, getUIState, emitGlobalUI, emitUI } from './lib/ui-state.js'
 import { replayToPosition, loadTimeTravelEvents, loadCardEvents } from './lib/time-travel.js'
 import { cmpPosition, positionForIndex } from './lib/position.js'
 import { dsePatch } from './lib/sse.js'
@@ -32,11 +32,15 @@ import { DocsPage, DocsTopicContent, DocsInner, DocsIndexContent } from './compo
 
 const app = new Hono()
 
+// Ensure DB is initialized before every route (SW may restart between requests)
+app.use(async (c, next) => {
+  await initialize()
+  await next()
+})
+
 // ── Boards list (index) ──────────────────────────────────────────────────────
 
 app.get('/', async (c) => {
-  await initialize()
-
   if (c.req.header('Datastar-Request') === 'true') {
     return streamSSE(c, async (stream) => {
       const templateHashes = await Promise.all(BOARD_TEMPLATES.map(async t => ({ id: t.id, title: t.title, description: t.description, hash: await getTemplateHash(t) })))
@@ -116,7 +120,6 @@ app.delete('/boards/:boardId', async (c) => {
 
 // Export: compress board events into a share URL hash fragment
 app.post('/boards/:boardId/share', async (c) => {
-  await initialize()
   const boardId = c.req.param('boardId')
   const db = await dbPromise
   const allEvents = await db.getAll('events')
@@ -137,7 +140,6 @@ app.post('/boards/:boardId/share', async (c) => {
 
 // Import: receive compressed events from hash fragment, replay into local store
 app.post('/import', async (c) => {
-  await initialize()
   const body = await c.req.json()
   if (!body || typeof body.data !== 'string') {
     return c.json({ error: 'Missing or invalid data field' }, 400)
@@ -246,7 +248,6 @@ app.post('/import', async (c) => {
 // ── Board detail ─────────────────────────────────────────────────────────────
 
 app.get('/boards/:boardId', async (c) => {
-  await initialize()
   const boardId = c.req.param('boardId')
 
   if (c.req.header('Datastar-Request') === 'true') {
@@ -312,7 +313,6 @@ app.get('/boards/:boardId', async (c) => {
 // ── Card detail ──────────────────────────────────────────────────────────────
 
 app.get('/boards/:boardId/cards/:cardId', async (c) => {
-  await initialize()
   const boardId = c.req.param('boardId')
   const cardId = c.req.param('cardId')
 
@@ -907,7 +907,7 @@ app.post('/command-menu/theme', async (c) => {
     subtitle: t.subtitle,
     group: 'Theme',
     themeId: t.id,
-    jsAction: `applyTheme('${t.id}');fetch('${base()}command-menu/close',{method:'POST'})`,
+    jsAction: `applyTheme('${t.id}')`,
   }))
   globalUIState.commandMenu = { query: '', results, context: globalUIState.commandMenu?.context || '/' }
   emitGlobalUI()
@@ -916,7 +916,6 @@ app.post('/command-menu/theme', async (c) => {
 
 // Time travel: enter
 app.post('/boards/:boardId/time-travel', async (c) => {
-  await initialize()
   const boardId = c.req.param('boardId')
   const ui = getUIState(boardId)
   const { allEvents, boardEvents } = await loadTimeTravelEvents(boardId)
@@ -1105,7 +1104,6 @@ app.get('/docs/:slug{.*}', (c) => {
 
 // Debug: inspect event log (real-time)
 app.get('/events', async (c) => {
-  await initialize()
   const boardFilter = c.req.query('board') || ''
   const db = await dbPromise
   const boards = (await db.getAll('boards')).sort((a, b) => (a.title || '').localeCompare(b.title || ''))

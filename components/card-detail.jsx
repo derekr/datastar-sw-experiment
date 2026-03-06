@@ -16,8 +16,8 @@ export function CardDetail({ card, column, columns, board, events, commandMenu, 
         <a id="card-detail-back" href={`${base()}boards/${board.id}`} class="back-link"><Icon name="lucide:arrow-left" /> {board.title}</a>
       </div>
       <div class="card-detail-body">
-        <div class="card-detail-main">
-          {label && <div class="card-detail-label-bar" style={`background: ${LABEL_COLORS[label]}`}></div>}
+          <div class="card-detail-main">
+          <div id="card-detail-label-bar" class="card-detail-label-bar" style={label ? `background: ${LABEL_COLORS[label]}` : 'display:none'}></div>
           <form
             class="card-detail-form"
             data-on:submit__prevent={`@put('${base()}cards/${card.id}', {contentType: 'form'})`}

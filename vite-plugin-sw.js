@@ -144,8 +144,15 @@ export default function serviceWorkerPlugin() {
       const swPath = path.resolve(config.root, 'sw.jsx');
       const kanbanPath = path.resolve(config.root, 'eg-kanban.js');
       const stellarPath = path.resolve(config.root, 'css/stellar.css');
+      const libDir = path.resolve(config.root, 'lib') + path.sep;
+      const componentsDir = path.resolve(config.root, 'components') + path.sep;
+      const cssDir = path.resolve(config.root, 'css') + path.sep;
       server.watcher.on('change', async (filePath) => {
-        if (filePath === swPath || filePath === kanbanPath) {
+        // Rebuild SW when any source file it bundles changes
+        if (filePath === swPath || filePath === kanbanPath
+            || filePath.startsWith(libDir)
+            || filePath.startsWith(componentsDir)
+            || (filePath.startsWith(cssDir) && filePath !== stellarPath)) {
           console.log('[sw-plugin] ' + path.basename(filePath) + ' changed, rebuilding...');
           await buildSW();
           // Don't full-reload — that fires before the new SW activates,

@@ -23,14 +23,14 @@ export function LabelPicker({ cardId, currentLabel }) {
       <span class="label-picker-label">Label</span>
       <div class="label-picker-swatches">
         {swatches}
-        {currentLabel && (
-          <button
+        <button
             type="button"
+            id={`label-clear-${cardId}`}
             class="label-swatch-clear"
+            style={currentLabel ? '' : 'display:none'}
             data-on:click={`@post('${base()}cards/${cardId}/label/none')`}
             title="Remove label"
           ><Icon name="lucide:x" /></button>
-        )}
       </div>
     </div>
   )
@@ -57,51 +57,48 @@ export function Card({ card, uiState, boardId }) {
         'data-on:click': `@post('${base()}cards/${card.id}/toggle-select')`,
       } : {})}
     >
-      {isSelecting && (
-        <span class="card-select-checkbox">{isSelected ? <Icon name="lucide:square-check" /> : <Icon name="lucide:square" />}</span>
-      )}
+      <span id={`card-${card.id}-checkbox`} class="card-select-checkbox" style={isSelecting ? '' : 'display:none'}>{isSelected ? <Icon name="lucide:square-check" /> : <Icon name="lucide:square" />}</span>
       <div class="card-content">
         <span class="card-title">{card.title}</span>
         {desc && <p class="card-desc">{desc}</p>}
       </div>
-      {!isSelecting && !isReadOnly && (
-        <div class="card-actions">
-          <button
-            class="card-edit-btn icon-btn"
-            data-on:click={`@post('${base()}cards/${card.id}/edit')`}
-            title="Edit"
-          ><Icon name="lucide:pencil" /></button>
-          {boardId && (
-            <a
-              class="card-expand-btn icon-btn"
-              href={`${base()}boards/${boardId}/cards/${card.id}`}
-              title="Open"
-            ><Icon name="lucide:arrow-up-right" /></a>
-          )}
-          <button
-            class="delete-btn icon-btn icon-btn--danger"
-            data-on:click__viewtransition={`@delete('${base()}cards/${card.id}')`}
-          >
-            <Icon name="lucide:x" />
-          </button>
-        </div>
-      )}
-      {isEditing && (
-        <form
-          class="card-edit-form"
-          data-on:submit__prevent={`@put('${base()}cards/${card.id}', {contentType: 'form'})`}
+      <div id={`card-${card.id}-actions`} class="card-actions" style={!isSelecting && !isReadOnly ? '' : 'display:none'}>
+        <button
+          class="card-edit-btn icon-btn"
+          data-on:click={`@post('${base()}cards/${card.id}/edit')`}
+          title="Edit"
+        ><Icon name="lucide:pencil" /></button>
+        {boardId && (
+          <a
+            class="card-expand-btn icon-btn"
+            href={`${base()}boards/${boardId}/cards/${card.id}`}
+            title="Open"
+          ><Icon name="lucide:arrow-up-right" /></a>
+        )}
+        <button
+          class="delete-btn icon-btn icon-btn--danger"
+          data-on:click__viewtransition={`@delete('${base()}cards/${card.id}')`}
+          title="Delete"
         >
-          <div class="card-edit-inputs">
-            <input name="title" type="text" value={card.title} placeholder="Title" autocomplete="off" />
-            <textarea name="description" placeholder="Description (optional)" rows="2">{desc}</textarea>
-          </div>
-          <LabelPicker cardId={card.id} currentLabel={label} />
-          <div class="card-edit-actions">
-            <button type="submit">Save</button>
-            <button type="button" data-on:click={`@post('${base()}cards/${card.id}/edit-cancel')`}>Cancel</button>
-          </div>
-        </form>
-      )}
+          <Icon name="lucide:x" />
+        </button>
+      </div>
+      <form
+        id={`card-${card.id}-edit-form`}
+        class="card-edit-form"
+        style={isEditing ? '' : 'display:none'}
+        data-on:submit__prevent={`@put('${base()}cards/${card.id}', {contentType: 'form'})`}
+      >
+        <div class="card-edit-inputs">
+          <input name="title" type="text" value={card.title} placeholder="Title" autocomplete="off" />
+          <textarea name="description" placeholder="Description (optional)" rows="2">{desc}</textarea>
+        </div>
+        <LabelPicker cardId={card.id} currentLabel={label} />
+        <div class="card-edit-actions">
+          <button type="submit">Save</button>
+          <button type="button" data-on:click={`@post('${base()}cards/${card.id}/edit-cancel')`}>Cancel</button>
+        </div>
+      </form>
     </div>
   )
 }
@@ -222,27 +219,28 @@ export function Column({ col, cards, columnCount, uiState, columns, boardId }) {
       <div class="column-header" tabindex="0">
         <h2>{col.title}</h2>
         <span class="count">{colCards.length}</span>
-        {!isReadOnly && columnCount > 1 && (
-          <button
+        <button
+            id={`col-${col.id}-delete`}
             class="col-delete-btn icon-btn icon-btn--danger"
+            style={!isReadOnly && columnCount > 1 ? '' : 'display:none'}
             data-on:click__viewtransition={`@delete('${base()}columns/${col.id}')`}
+            title="Delete column"
           ><Icon name="lucide:x" /></button>
-        )}
       </div>
       <div class="cards-container" data-column-id={col.id}>
         {colCards.length === 0
           ? <p class="empty">No cards yet</p>
           : colCards.map(card => <Card card={card} uiState={uiState} boardId={boardId} />)}
       </div>
-      {!isReadOnly && !uiState?.selectionMode && (
-        <form
-          class="add-form"
-          data-on:submit__prevent__viewtransition={`@post('${base()}columns/${col.id}/cards', {contentType: 'form'}); evt.target.reset()`}
-        >
-          <input name="title" type="text" placeholder="Add a card..." autocomplete="off" />
-          <button type="submit"><Icon name="lucide:plus" /></button>
-        </form>
-      )}
+      <form
+        id={`add-form-${col.id}`}
+        class="add-form"
+        style={!isReadOnly && !uiState?.selectionMode ? '' : 'display:none'}
+        data-on:submit__prevent__viewtransition={`@post('${base()}columns/${col.id}/cards', {contentType: 'form'}); evt.target.reset()`}
+      >
+        <input name="title" type="text" placeholder="Add a card..." autocomplete="off" />
+        <button type="submit" title="Add card"><Icon name="lucide:plus" /></button>
+      </form>
     </div>
   )
 }
@@ -439,15 +437,15 @@ export function Board({ board, columns, cards, uiState, tabCount, connStatus, co
           <Column col={col} cards={cards} columnCount={columns.length} uiState={uiState} columns={columns} boardId={board.id} />
         ))}
       </div>
-      {!isSelecting && !isTimeTraveling && (
-        <form
-          class="add-col-form"
-          data-on:submit__prevent__viewtransition={`@post('${base()}boards/${board.id}/columns', {contentType: 'form'}); evt.target.reset()`}
-        >
-          <input name="title" type="text" placeholder="Add a column..." autocomplete="off" />
-          <button type="submit"><Icon name="lucide:plus" /> Column</button>
-        </form>
-      )}
+      <form
+        id="add-col-form"
+        class="add-col-form"
+        style={!isSelecting && !isTimeTraveling ? '' : 'display:none'}
+        data-on:submit__prevent__viewtransition={`@post('${base()}boards/${board.id}/columns', {contentType: 'form'}); evt.target.reset()`}
+      >
+        <input name="title" type="text" placeholder="Add a column..." autocomplete="off" />
+        <button type="submit"><Icon name="lucide:plus" /> Column</button>
+      </form>
       {isSelecting && (
         <SelectionBar boardId={board.id} columns={columns} selectedCount={selectedCount} />
       )}
@@ -467,7 +465,7 @@ export function Board({ board, columns, cards, uiState, tabCount, connStatus, co
 
 export function SelectionBar({ boardId, columns, selectedCount }) {
   return (
-    <div class="selection-bar" data-signals="{showColumnPicker: false}">
+    <div id="selection-bar" class="selection-bar" data-signals="{showColumnPicker: false}">
       <span class="selection-bar-count">{selectedCount} selected</span>
       <div class="selection-bar-actions">
         <button
