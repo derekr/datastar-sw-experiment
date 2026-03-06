@@ -5165,8 +5165,8 @@ if (request.headers.get('Accept-Encoding')?.includes('br')) {
 
       <section class="docs-section">
         <h2>Service worker limitation</h2>
-        <p>You can't easily do this in a service worker. The Compression Streams API is available in some contexts, but it's not straightforward to use with SSE in a SW.</p>
-        <p>With a real backend (Node, Go, Python), this is a simple addition and a significant optimization for high-frequency morphs.</p>
+        <p>You can't easily do this in a service worker. The browser's <code>Compression Streams API</code> supports gzip and deflate natively, but <strong>not brotli</strong>. You could use gzip as a fallback — it still saves 50-70% — but it's not as efficient as brotli.</p>
+        <p>With a real backend (Node, Go, Python), brotli is a simple addition and a significant optimization for high-frequency morphs. One demo achieved <strong>150-250:1 compression ratios</strong> on frequent SSE morphs.</p>
       </section>
 
       <section class="docs-section">
