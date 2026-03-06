@@ -4802,7 +4802,7 @@ fetch('/api/boards')  // what if this changes?
 // <a href="/boards/new">Create Board</a>
 // <a href="/boards/123">View Board</a>
 // The client just follows links. No URL knowledge needed.`}</code></pre>
-        <p>This is called "driving the application state through hypermedia" — HATEOAS. The server is the pilot; the client is the display.</p>
+        <p>This is called "driving the application state through hypermedia" (HATEOAS). The server is the pilot; the client is the display.</p>
       </section>
 
       <section class="docs-section">
