@@ -4926,6 +4926,7 @@ function DocsMpaContent({ topic, commandMenu }) {
 })}</script>`}</code></pre>
         <p>When the browser sees a link to a board page, it prefetches the HTML in the background. When you click, the page loads instantly from cache.</p>
         <p>This app enables speculation rules on non-board pages (the board list, docs). Board pages are excluded because they're heavier and the SSE connection already keeps them fresh.</p>
+        <p>Note: Speculation Rules are supported in Chromium browsers. Safari and Firefox fall back to normal navigation — the app still works, just without instant prefetch.</p>
       </section>
 
       <section class="docs-section">
@@ -4942,21 +4943,6 @@ function DocsMpaContent({ topic, commandMenu }) {
             <tr><td>Bundle includes router</td><td>No router in bundle</td></tr>
           </tbody>
         </table>
-      </section>
-
-      <section class="docs-section">
-        <h2>When to use which</h2>
-        <p>SPA routing makes sense for:</p>
-        <ul class="docs-list">
-          <li>Apps that need instant navigation without full page loads (like Gmail)</li>
-          <li>Heavy client-side state that would be expensive to re-render</li>
-        </ul>
-        <p>MPA + View Transitions makes sense for:</p>
-        <ul class="docs-list">
-          <li>Content-heavy sites where SEO matters</li>
-          <li>Server-driven apps like this one</li>
-          <li>Simpler codebases — no routing abstraction</li>
-        </ul>
       </section>
 
       <DocsPager topic={topic} />
