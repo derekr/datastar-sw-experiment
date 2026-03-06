@@ -2976,31 +2976,39 @@ input:not(#_), textarea:not(#_), select:not(#_) { font-size: max(1rem, 16px); }
 /* MPA cross-document view transitions */
 @view-transition { navigation: auto; }
 
+/* Named groups morph position+size; root swaps instantly */
 ::view-transition-group(*) {
   animation-duration: 200ms;
   animation-timing-function: var(--anim-ease-emphasized);
 }
-/* Default: named groups morph, everything else instant (no global crossfade) */
+::view-transition-group(root) { animation: none; }
 ::view-transition-old(*) { animation: none; opacity: 0; }
 ::view-transition-new(*) { animation: none; }
 
 /* Card expand/collapse — group morphs position+size,
-   new snapshot paints over old (no crossfade) */
+   new snapshot paints over old */
 ::view-transition-group(card-expand) {
-  animation-duration: 300ms;
+  animation-duration: 200ms;
   animation-timing-function: var(--anim-ease-emphasized);
   overflow: clip;
   z-index: 100;
 }
-::view-transition-old(card-expand),
-::view-transition-new(card-expand) {
+::view-transition-old(card-expand) {
   animation: none;
+  height: 100%;
+  overflow: clip;
+}
+::view-transition-new(card-expand) {
+  animation: vt-fade-in 120ms ease 50ms both;
   mix-blend-mode: normal;
   height: 100%;
   overflow: clip;
-  object-fit: cover;
-  object-position: top left;
 }
+/* Board fades in only when collapsing back from card detail */
+html:active-view-transition-type(card-collapse) ::view-transition-new(root) {
+  animation: vt-fade-in 150ms ease both;
+}
+
 @keyframes vt-fade-out {
   from { opacity: 1; }
   to { opacity: 0; }
@@ -3221,6 +3229,8 @@ function Shell({ path, children }) {
         <link rel="icon" href={`${base()}icon.svg`} type="image/svg+xml" />
         <link rel="apple-touch-icon" href={`${base()}icon-192.png`} />
         <script>{raw(`(function(){var t=localStorage.getItem('theme')||'system';function apply(t){var dark=t==='dark'||(t!=='light'&&matchMedia('(prefers-color-scheme:dark)').matches);document.documentElement.dataset.theme=dark?'dark':'light';var m=document.getElementById('theme-color-meta');if(m)m.content=dark?'#121017':'#f4eefa'}apply(t);matchMedia('(prefers-color-scheme:dark)').addEventListener('change',function(){var t=localStorage.getItem('theme')||'system';if(t==='system')apply(t)});window.applyTheme=function(t){localStorage.setItem('theme',t);apply(t)};window.previewTheme=function(t){apply(t)};window.revertTheme=function(){apply(localStorage.getItem('theme')||'system')}})()`)}</script>
+        <link rel="preload" href="https://fonts.bunny.net/inter/files/inter-latin-100-normal.woff2" as="font" type="font/woff2" crossorigin />
+        <link rel="preload" href="https://fonts.bunny.net/inter/files/inter-latin-900-normal.woff2" as="font" type="font/woff2" crossorigin />
         <link rel="stylesheet" href={`${base()}${__STELLAR_CSS__}`} />
         <title>Kanban</title>
         <style>{raw(CSS)}</style>
@@ -3490,6 +3500,7 @@ function Shell({ path, children }) {
             if (!from) return;
             var m = new URL(from.url).pathname.match(/boards\\/[^/]+\\/cards\\/([^/]+)/);
             if (m) {
+              e.viewTransition.types.add('card-collapse');
               var el = document.getElementById('card-' + m[1]);
               if (el) el.style.viewTransitionName = 'card-expand';
             }
