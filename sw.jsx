@@ -128,6 +128,7 @@ const DOCS_TOPICS = [
   { slug: 'bonus/indexeddb',    title: 'IndexedDB: Keeping It Light',    section: 'bonus' },
   { slug: 'bonus/fractional',   title: 'Fractional Indexing',            section: 'bonus' },
   { slug: 'bonus/local-first',  title: 'Local-First in the Browser',      section: 'bonus' },
+  { slug: 'bonus/brotli',      title: 'Brotli Compression for SSE',     section: 'bonus' },
 ]
 
 const LABEL_COLORS = {
@@ -5141,6 +5142,46 @@ function DocsLocalFirstContent({ topic, commandMenu }) {
   )
 }
 
+function DocsBrotliContent({ topic, commandMenu }) {
+  return (
+    <DocsInner topic={topic} commandMenu={commandMenu}>
+      <h1>{topic.title}</h1>
+
+      <section class="docs-section">
+        <p>Long-lived SSE connections pushing frequent HTML morphs can benefit from compression. This bonus section covers the tradeoffs.</p>
+      </section>
+
+      <section class="docs-section">
+        <h2>The optimization</h2>
+        <p>A full board morph is 5-15KB of HTML. Over a long-lived SSE connection with frequent updates, that adds up. Brotli compression can shrink this by 70-80%.</p>
+        <p>The server checks <code>Accept-Encoding: br</code> and streams compressed data:</p>
+        <pre><code>{`// Server side:
+if (request.headers.get('Accept-Encoding')?.includes('br')) {
+  stream = compress(stream)  // brotli streaming compressor
+  response.headers.set('Content-Encoding', 'br')
+}`}</code></pre>
+      </section>
+
+      <section class="docs-section">
+        <h2>Service worker limitation</h2>
+        <p>You can't easily do this in a service worker. The Compression Streams API is available in some contexts, but it's not straightforward to use with SSE in a SW.</p>
+        <p>With a real backend (Node, Go, Python), this is a simple addition and a significant optimization for high-frequency morphs.</p>
+      </section>
+
+      <section class="docs-section">
+        <h2>Tradeoffs</h2>
+        <ul class="docs-list">
+          <li><strong>CPU cost</strong> — compression takes CPU cycles on both ends.</li>
+          <li><strong>Latency</strong> — streaming compression helps, but there's still overhead.</li>
+          <li><strong>Not needed for low-frequency updates</strong> — if updates are rare, the savings don't matter.</li>
+        </ul>
+      </section>
+
+      <DocsPager topic={topic} />
+    </DocsInner>
+  )
+}
+
 function DocsServiceWorkerContent({ topic, commandMenu }) {
   return (
     <DocsInner topic={topic} commandMenu={commandMenu}>
@@ -5308,6 +5349,8 @@ function DocsTopicContent({ topic, commandMenu }) {
       return <DocsFractionalIndexingContent topic={topic} commandMenu={commandMenu} />
     case 'bonus/local-first':
       return <DocsLocalFirstContent topic={topic} commandMenu={commandMenu} />
+    case 'bonus/brotli':
+      return <DocsBrotliContent topic={topic} commandMenu={commandMenu} />
     default:
       return <DocsTopicStubContent topic={topic} commandMenu={commandMenu} />
   }
