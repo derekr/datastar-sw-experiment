@@ -5031,8 +5031,6 @@ function DocsTopicContent({ topic, commandMenu }) {
       return <DocsSignalsContent topic={topic} commandMenu={commandMenu} />
     case 'core/hypermedia':
       return <DocsHypermediaContent topic={topic} commandMenu={commandMenu} />
-    case 'core/mpa':
-      return <DocsMpaContent topic={topic} commandMenu={commandMenu} />
     case 'bonus/sw':
       return <DocsServiceWorkerContent topic={topic} commandMenu={commandMenu} />
     default:
