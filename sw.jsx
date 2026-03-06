@@ -1016,10 +1016,14 @@ function flattenJsx(jsx) {
 }
 
 function dsePatch(selector, jsx, mode = 'outer', { useViewTransition = false } = {}) {
+  performance?.mark('dsePatch-start')
   const html = flattenJsx(jsx)
+  performance?.mark('dsePatch-render')
   const lines = [`mode ${mode}`, `selector ${selector}`]
   if (useViewTransition) lines.push('useViewTransition true')
   lines.push(`elements ${html}`)
+  performance?.mark('dsePatch-end')
+  performance?.measure('dsePatch', 'dsePatch-start', 'dsePatch-end')
   return {
     event: 'datastar-patch-elements',
     data: lines.join('\n'),
@@ -5643,8 +5647,10 @@ app.get('/boards/:boardId', async (c) => {
   if (c.req.header('Datastar-Request') === 'true') {
     return streamSSE(c, async (stream) => {
       const pushBoard = async (selector, mode, opts) => {
+        performance?.mark('pushBoard-start')
         const ui = getUIState(boardId)
         let data
+        performance?.mark('db-read-start')
         if (ui.timeTravelPos >= 0 && ui.timeTravelAllEvents && ui.timeTravelEvents) {
           // Time travel mode: replay to the current position
           const targetIdx = ui.timeTravelEvents[ui.timeTravelPos].idx
@@ -5652,10 +5658,14 @@ app.get('/boards/:boardId', async (c) => {
         } else {
           data = await getBoard(boardId)
         }
+        performance?.mark('db-read-end')
+        performance?.measure('db-read', 'db-read-start', 'db-read-end')
         if (!data) return
         const tabCount = await getTabCount(boardId)
         const connStatus = await getConnectionStatus()
         await stream.writeSSE(dsePatch(selector, <Board board={data.board} columns={data.columns} cards={data.cards} uiState={ui} tabCount={tabCount} connStatus={connStatus} commandMenu={globalUIState.commandMenu} />, mode, opts))
+        performance?.mark('pushBoard-end')
+        performance?.measure('pushBoard', 'pushBoard-start', 'pushBoard-end')
       }
 
       const topic = `board:${boardId}:changed`
