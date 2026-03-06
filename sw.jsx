@@ -4315,6 +4315,13 @@ function DocsIndexContent({ commandMenu }) {
         <p>In this app, the "server" happens to be a service worker running in your browser — which means you can use it offline and everything stays on your device. But the Datastar patterns are identical to what you'd use with Go, Python, Node, or any other backend. The service worker is an implementation detail; the architecture is the lesson.</p>
       </section>
 
+      <section class="docs-section" id="further-reading">
+        <h2>Further Reading</h2>
+        <ul class="docs-list">
+          <li><a href="https://zweiundeins.gmbh/en/methodology/spa-vs-hypermedia-real-world-performance-under-load" style="color: var(--primary-7)">SPA vs. Hypermedia: Real-World Performance Under Load</a> — zwei und eins built the same AI chat app as both an SPA (Next.js) and a Datastar hypermedia app, then benchmarked under Slow 4G + CPU throttling. The hypermedia version scored 100/100 Lighthouse performance (vs. 54), was 7.5× faster to interactive, had 0ms total blocking time, and transferred 26× less data. Their SSE compression numbers (58.5× Brotli ratio on persistent streams) validate the fat morph approach used in this app.</li>
+        </ul>
+      </section>
+
       <section class="docs-toc-section" id="topics">
         <h2>Core Concepts</h2>
         <p class="docs-toc-intro">These are the Datastar patterns that make this app tick.</p>
@@ -4572,7 +4579,7 @@ data: elements <div id="board" class="board">...</div>`}</code></pre>
         <p>The <code>selector</code> identifies which DOM element to update. The <code>mode</code> controls how — <code>outer</code> replaces the element itself (including its tag), <code>inner</code> replaces only its children. The <code>elements</code> field contains the full HTML to morph in.</p>
         <p>The selector can target anything: <code>body</code> is the happy path for full-page morphs, or specific containers like <code>#app</code>, <code>#header</code>, <code>#board</code>. You can also morph individual elements like a status indicator or pager. The goal is simple and predictable fat morphs.</p>
         <p>Beyond HTML morphs, you can also <strong>morph signals</strong> for fine-grained updates — changing a single value without touching the DOM. This is useful for status icons, badges, or driving client-side heavy things like 3D scenes.</p>
-        <p>This approach — sending full HTML over SSE with Brotli compression — is what makes fat morphs production-viable. A 15KB morph compresses to ~3KB, making it competitive with delta/diff approaches. See <a href={base() + 'docs/bonus/brotli'}>Brotli Compression</a> for details.</p>
+        <p>This approach — sending full HTML over SSE with Brotli compression — is what makes fat morphs production-viable. A 15KB morph compresses to ~3KB, making it competitive with delta/diff approaches. A <a href="https://zweiundeins.gmbh/en/methodology/spa-vs-hypermedia-real-world-performance-under-load" style="color: var(--primary-7)">2026 benchmark</a> showed Brotli achieving 58.5× compression on a persistent SSE stream over a 10-turn conversation — the repetitive structure of HTML morphs is ideal for streaming compression. See <a href={base() + 'docs/bonus/brotli'}>Brotli Compression</a> for details.</p>
         <p>On the server, a helper function handles the formatting:</p>
         <pre><code>{`function dsePatch(selector, jsx, mode = 'outer', opts) {
   return {
@@ -5249,6 +5256,12 @@ function DocsLocalFirstContent({ topic, commandMenu }) {
         <p>This demo exists to show Datastar patterns, not to recommend local-first as a production architecture.</p>
       </section>
 
+      <section class="docs-section">
+        <h2>The conventional wisdom</h2>
+        <p>A <a href="https://zweiundeins.gmbh/en/methodology/spa-vs-hypermedia-real-world-performance-under-load" style="color: var(--primary-7)">2026 SPA-vs-Hypermedia benchmark by zwei und eins</a> lists "offline-first is a hard requirement" as a reason to choose an SPA architecture. That's the standard advice — and it's mostly right. SPAs can use standard tools like service worker caches, IndexedDB, and background sync APIs to work offline.</p>
+        <p>This project is an experiment in the opposite direction: a <strong>hypermedia app that works offline</strong> by moving the server itself into the browser. It works, but with real limitations (see above). The interesting question isn't whether this is production-ready (it isn't), but whether the <em>architecture</em> — event sourcing, SSE morphing, server-owned state — could support offline with a proper sync layer added later.</p>
+      </section>
+
       <DocsPager topic={topic} />
     </DocsInner>
   )
@@ -5277,7 +5290,18 @@ if (request.headers.get('Accept-Encoding')?.includes('br')) {
       <section class="docs-section">
         <h2>Service worker limitation</h2>
         <p>You can't easily do this in a service worker. The browser's <code>Compression Streams API</code> supports gzip and deflate natively, but <strong>not brotli</strong>. You could use gzip as a fallback — it still saves 50-70% — but it's not as efficient as brotli.</p>
-        <p>With a real backend (Node, Go, Python), brotli is a simple addition and a significant optimization for high-frequency morphs. One demo achieved <strong>150-250:1 compression ratios</strong> on frequent SSE morphs.</p>
+        <p>With a real backend (Node, Go, Python), brotli is a simple addition and a significant optimization for high-frequency morphs.</p>
+      </section>
+
+      <section class="docs-section">
+        <h2>Real-world numbers</h2>
+        <p>A <a href="https://zweiundeins.gmbh/en/methodology/spa-vs-hypermedia-real-world-performance-under-load" style="color: var(--primary-7)">2026 benchmark by zwei und eins</a> built the same AI chat app as both an SPA (Next.js) and a hypermedia app (PHP/Swoole/Datastar), then measured SSE compression on identical conversations:</p>
+        <ul class="docs-list">
+          <li><strong>Single turn</strong> — Brotli achieved an <strong>18.7× compression ratio</strong>, turning 112 KB of uncompressed HTML into 6 KB transferred (vs. 14.4 KB uncompressed for the SPA with no compression).</li>
+          <li><strong>10-turn conversation</strong> — on a persistent SSE stream, Brotli hit <strong>58.5× compression</strong>. Cross-turn repetition in the HTML gives the compressor more to work with as the conversation grows.</li>
+          <li><strong>Net result</strong> — despite sending 29× more raw data (naively re-streaming the full HTML fragment per token), the hypermedia version transferred <strong>2× less data</strong> than the SPA over 10 turns.</li>
+        </ul>
+        <p>The key insight: a persistent SSE connection lets Brotli build a shared dictionary across all pushes. The more similar the morphs are to each other (which they are — it's the same template with incremental content changes), the better the compression gets over time.</p>
       </section>
 
       <section class="docs-section">
