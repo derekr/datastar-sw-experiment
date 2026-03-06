@@ -2980,12 +2980,9 @@ input:not(#_), textarea:not(#_), select:not(#_) { font-size: max(1rem, 16px); }
   animation-duration: 200ms;
   animation-timing-function: var(--anim-ease-emphasized);
 }
-/* Default: named groups morph, everything else instant */
+/* Default: named groups morph, everything else instant (no global crossfade) */
 ::view-transition-old(*) { animation: none; opacity: 0; }
 ::view-transition-new(*) { animation: none; }
-/* Root: subtle crossfade so the page doesn't pop during card transitions */
-::view-transition-old(root) { animation: vt-fade-out 250ms ease both; opacity: 1; }
-::view-transition-new(root) { animation: vt-fade-in 200ms ease 50ms both; }
 
 /* Card expand/collapse — group morphs position+size,
    old/new crossfade so content swaps smoothly during resize */
