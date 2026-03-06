@@ -119,15 +119,15 @@ const ALLOWED_EVENT_TYPES = new Set(Object.keys(EVENT_VERSIONS))
 // --- Docs topics ---
 
 const DOCS_TOPICS = [
+  { slug: 'core/hypermedia',    title: 'Hypermedia — The Missing Pattern', section: 'core' },
   { slug: 'core/event-sourcing', title: 'Event Sourcing & CQRS',          section: 'core' },
   { slug: 'core/sse-fat-morph', title: 'SSE & Fat Morphing',              section: 'core' },
   { slug: 'core/signals',       title: 'Signals & Server-Owned UI State', section: 'core' },
-  { slug: 'core/hypermedia',    title: 'Hypermedia — The Missing Pattern', section: 'core' },
-  { slug: 'bonus/mpa',         title: 'MPA Navigations',                section: 'bonus' },
-  { slug: 'bonus/sw',          title: 'Service Worker as Server',         section: 'bonus' },
-  { slug: 'bonus/indexeddb',   title: 'IndexedDB: Keeping It Light',    section: 'bonus' },
+  { slug: 'core/mpa',          title: 'MPA Navigations',                section: 'core' },
+  { slug: 'bonus/sw',           title: 'Service Worker as Server',         section: 'bonus' },
+  { slug: 'bonus/indexeddb',    title: 'IndexedDB: Keeping It Light',    section: 'bonus' },
   { slug: 'bonus/fractional',   title: 'Fractional Indexing',            section: 'bonus' },
-  { slug: 'bonus/local-first',  title: 'Local-First in the Browser',    section: 'bonus' },
+  { slug: 'bonus/local-first',  title: 'Local-First in the Browser',      section: 'bonus' },
 ]
 
 const LABEL_COLORS = {
@@ -5030,6 +5030,8 @@ function DocsTopicContent({ topic, commandMenu }) {
       return <DocsSignalsContent topic={topic} commandMenu={commandMenu} />
     case 'core/hypermedia':
       return <DocsHypermediaContent topic={topic} commandMenu={commandMenu} />
+    case 'core/mpa':
+      return <DocsMpaContent topic={topic} commandMenu={commandMenu} />
     case 'bonus/sw':
       return <DocsServiceWorkerContent topic={topic} commandMenu={commandMenu} />
     default:
