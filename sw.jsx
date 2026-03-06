@@ -2985,18 +2985,21 @@ input:not(#_), textarea:not(#_), select:not(#_) { font-size: max(1rem, 16px); }
 ::view-transition-new(*) { animation: none; }
 
 /* Card expand/collapse — group morphs position+size,
-   old/new crossfade so content swaps smoothly during resize */
+   new snapshot paints over old (no crossfade) */
 ::view-transition-group(card-expand) {
   animation-duration: 300ms;
   animation-timing-function: var(--anim-ease-emphasized);
-  overflow: hidden;
+  overflow: clip;
   z-index: 100;
 }
-::view-transition-old(card-expand) {
-  animation: vt-fade-out 200ms ease both;
-}
+::view-transition-old(card-expand),
 ::view-transition-new(card-expand) {
-  animation: vt-fade-in 200ms ease 100ms both;
+  animation: none;
+  mix-blend-mode: normal;
+  height: 100%;
+  overflow: clip;
+  object-fit: cover;
+  object-position: top left;
 }
 @keyframes vt-fade-out {
   from { opacity: 1; }
