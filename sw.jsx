@@ -9,18 +9,12 @@ import { generateKeyBetween, generateNKeysBetween } from 'fractional-indexing'
 // Not imported here because Safari's SW fetch handler doesn't reliably
 // intercept <script src> subresource requests on SW-served pages.
 
-// Iconify web component for consistent icons (loaded from CDN like Datastar).
+// Icons via CSS mask-image. CSS rules are generated at build time by @iconify/utils
+// from @iconify-json/lucide and injected as __LUCIDE_ICON_CSS__. No JS needed.
+// Usage: <Icon name="lucide:x" /> renders <span class="icon--lucide icon--lucide--x">
 function Icon({ name, ...props }) {
-  return <iconify-icon icon={name} inline {...props}></iconify-icon>
-}
-
-// Inline SVG icons for critical above-the-fold elements that must render instantly
-// without waiting for the Iconify JS to load + fetch icon data from CDN.
-function ArrowLeftIcon() {
-  return <svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24" style="vertical-align: -0.125em;"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m12 19l-7-7l7-7m7 7H5"></path></svg>
-}
-function ArrowRightIcon() {
-  return <svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24" style="vertical-align: -0.125em;"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14m-7-7l7 7l-7 7"></path></svg>
+  const iconName = name.startsWith('lucide:') ? name.slice(7) : name
+  return <span class={`icon--lucide icon--lucide--${iconName}`} aria-hidden="true" {...props}></span>
 }
 
 // Base path derived from SW scope — '/' locally, '/repo-name/' on GitHub Pages.
@@ -1915,8 +1909,9 @@ function BoardsList({ boards, templates, commandMenu }) {
 const CSS = `
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
-/* Reserve space for iconify-icon — prevents layout shift while icon data loads from API */
-iconify-icon { display: inline-block; width: 1em; height: 1em; }
+/* Lucide icons via CSS mask-image (generated at build time by @iconify/utils) */
+${__LUCIDE_ICON_CSS__}
+.icon--lucide { vertical-align: -0.125em; }
 
 /* Remove 300ms tap delay on all interactive elements */
 a, button, input, textarea, select, [data-on\\:click], [tabindex] {
@@ -2277,7 +2272,7 @@ input:not(#_), textarea:not(#_), select:not(#_) { font-size: max(1rem, 16px); }
 .card-desc { font-size: var(--font-size--2); color: var(--neutral-8); margin: 4px 0 0; word-break: break-word; }
 .card-actions { display: flex; align-items: center; gap: 0; flex-shrink: 0; margin-left: 4px; }
 
-.card-edit-btn iconify-icon { font-size: 0.85em; }
+.card-edit-btn .icon--lucide { font-size: 0.85em; }
 .card-edit-btn:hover { color: var(--primary-7); }
 
 .card-edit-form {
@@ -3233,7 +3228,6 @@ function Shell({ path, children }) {
           type="module"
           src="https://cdn.jsdelivr.net/gh/starfederation/datastar@1.0.0-RC.8/bundles/datastar.js"
         ></script>
-        <script src="https://cdn.jsdelivr.net/npm/iconify-icon@2/dist/iconify-icon.min.js"></script>
         {isBoardPage && <script src={`${base()}${__KANBAN_JS__}`}></script>}
         {!isBoardPage && <script type="speculationrules">{raw(JSON.stringify({
           prefetch: [{
@@ -3511,8 +3505,9 @@ function Shell({ path, children }) {
 const DOCS_CSS = `
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
-/* Reserve space for iconify-icon — prevents layout shift while icon data loads from API */
-iconify-icon { display: inline-block; width: 1em; height: 1em; }
+/* Lucide icons via CSS mask-image */
+${__LUCIDE_ICON_CSS__}
+.icon--lucide { vertical-align: -0.125em; }
 
 body {
   font-family: 'Inter', system-ui, -apple-system, sans-serif;
@@ -3995,6 +3990,10 @@ body {
 const EVENTS_CSS = `
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
+/* Lucide icons via CSS mask-image */
+${__LUCIDE_ICON_CSS__}
+.icon--lucide { vertical-align: -0.125em; }
+
 body {
   font-family: 'Inconsolata', ui-monospace, 'Cascadia Code', 'Source Code Pro', Menlo, Consolas, monospace;
   background: var(--neutral-1);
@@ -4195,7 +4194,6 @@ function DocsShell({ title, children }) {
           type="module"
           src="https://cdn.jsdelivr.net/gh/starfederation/datastar@1.0.0-RC.8/bundles/datastar.js"
         ></script>
-        <script src="https://cdn.jsdelivr.net/npm/iconify-icon@2/dist/iconify-icon.min.js"></script>
       </head>
       <body>
         {children}
@@ -4228,7 +4226,7 @@ function DocsSidebar({ currentSlug }) {
   const bonus = DOCS_TOPICS.filter(t => t.section === 'bonus')
   return (
     <nav class="docs-sidebar" id="docs-sidebar">
-      <a href={base()} class="docs-sidebar-home"><ArrowLeftIcon /> Back to app</a>
+      <a href={base()} class="docs-sidebar-home"><Icon name="lucide:arrow-left" /> Back to app</a>
       <a href={`${base()}docs`} class={`docs-sidebar-link docs-sidebar-overview${!currentSlug ? ' docs-sidebar-link--active' : ''}`}>Overview</a>
       <div class="docs-sidebar-section">
         <h3 class="docs-sidebar-heading">Core Concepts</h3>
@@ -4352,8 +4350,8 @@ function DocsPager({ topic }) {
   const next = idx < DOCS_TOPICS.length - 1 ? DOCS_TOPICS[idx + 1] : null
   return (
     <nav class="docs-pager">
-      {prev ? <a href={`${base()}docs/${prev.slug}`} class="docs-pager-link docs-pager-prev"><ArrowLeftIcon /> {prev.title}</a> : <span />}
-      {next ? <a href={`${base()}docs/${next.slug}`} class="docs-pager-link docs-pager-next">{next.title} <ArrowRightIcon /></a> : <span />}
+      {prev ? <a href={`${base()}docs/${prev.slug}`} class="docs-pager-link docs-pager-prev"><Icon name="lucide:arrow-left" /> {prev.title}</a> : <span />}
+      {next ? <a href={`${base()}docs/${next.slug}`} class="docs-pager-link docs-pager-next">{next.title} <Icon name="lucide:arrow-right" /></a> : <span />}
     </nav>
   )
 }
@@ -5487,7 +5485,6 @@ function EventsPage({ boards, boardFilter }) {
           type="module"
           src="https://cdn.jsdelivr.net/gh/starfederation/datastar@1.0.0-RC.8/bundles/datastar.js"
         ></script>
-        <script src="https://cdn.jsdelivr.net/npm/iconify-icon@2/dist/iconify-icon.min.js"></script>
       </head>
       <body>
         <h1>Event Log <span><a href={base()}><Icon name="lucide:arrow-left" /> boards</a></span></h1>
