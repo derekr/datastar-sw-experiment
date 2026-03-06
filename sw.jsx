@@ -5118,7 +5118,7 @@ function DocsLocalFirstContent({ topic, commandMenu }) {
 
       <section class="docs-section">
         <h2>Event log is sync-ready</h2>
-        <p>The event log is the key to future sync capability. If you add a transport layer (WebRTC, WebSocket, or HTTP), the events are already structured for sharing:</p>
+        <p>The event log is the key to future sync capability. If you add a transport layer (WebRTC or HTTP), the events are already structured for sharing:</p>
         <ul class="docs-list">
           <li>Immutable events — can be replayed in order</li>
           <li>Includes causation IDs — know what caused what</li>
