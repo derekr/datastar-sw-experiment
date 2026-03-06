@@ -1,11 +1,11 @@
 ---
 # datastar_sw-kr7y
 title: 'Docs (bonus): Local-First in the Browser'
-status: todo
+status: in-progress
 type: task
 priority: normal
 created_at: 2026-03-05T20:48:32Z
-updated_at: 2026-03-05T20:48:40Z
+updated_at: 2026-03-06T01:09:55Z
 parent: datastar_sw-9bz9
 blocked_by:
     - datastar_sw-yzrf

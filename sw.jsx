@@ -5086,6 +5086,61 @@ generateKeyBetween("c", null)  // → "c0"`}</code></pre>
   )
 }
 
+function DocsLocalFirstContent({ topic, commandMenu }) {
+  return (
+    <DocsInner topic={topic} commandMenu={commandMenu}>
+      <h1>{topic.title}</h1>
+
+      <section class="docs-section">
+        <p><strong>Datastar is not built for local-first.</strong> This demo pushes it into territory it wasn't designed for. Local-first in the browser is still experimental. This bonus section is honest about the tradeoffs.</p>
+      </section>
+
+      <section class="docs-section">
+        <h2>What "local-first" means here</h2>
+        <ul class="docs-list">
+          <li><strong>Data lives on-device</strong> — IndexedDB stores everything. No server, no API calls.</li>
+          <li><strong>Works offline</strong> — the service worker serves the app, IndexedDB holds the data.</li>
+          <li><strong>No costs</strong> — no hosting, no auth, no API keys.</li>
+        </ul>
+      </section>
+
+      <section class="docs-section">
+        <h2>Tradeoffs</h2>
+        <ul class="docs-list">
+          <li><strong>No cross-device sync</strong> — data lives in one browser. (WebRTC could fix this — future work.)</li>
+          <li><strong>SW lifecycle</strong> — browser kills idle service workers after ~30s. In-memory state resets.</li>
+          <li><strong>Storage eviction</strong> — browsers can evict IndexedDB under storage pressure.</li>
+          <li><strong>No real backend</strong> — can't share boards with others without exporting/importing.</li>
+        </ul>
+      </section>
+
+      <section class="docs-section">
+        <h2>Event log is sync-ready</h2>
+        <p>The event log is the key to future sync capability. If you add a transport layer (WebRTC, WebSocket, or HTTP), the events are already structured for sharing:</p>
+        <ul class="docs-list">
+          <li>Immutable events — can be replayed in order</li>
+          <li>Includes causation IDs — know what caused what</li>
+          <li>Projections rebuild from events — no data loss</li>
+        </ul>
+        <p>The architecture is sync-ready; the transport layer is the missing piece.</p>
+      </section>
+
+      <section class="docs-section">
+        <h2>Is this a good pattern?</h2>
+        <p>Honestly? Not really. Datastar works best with a real backend. Running a SW as a server is a fun experiment but has fundamental limitations:</p>
+        <ul class="docs-list">
+          <li>No WebSockets in service workers — SSE only</li>
+          <li>No background sync when SW is killed</li>
+          <li>Limited storage APIs compared to a real database</li>
+        </ul>
+        <p>This demo exists to show Datastar patterns, not to recommend local-first as a production architecture.</p>
+      </section>
+
+      <DocsPager topic={topic} />
+    </DocsInner>
+  )
+}
+
 function DocsServiceWorkerContent({ topic, commandMenu }) {
   return (
     <DocsInner topic={topic} commandMenu={commandMenu}>
@@ -5251,6 +5306,8 @@ function DocsTopicContent({ topic, commandMenu }) {
       return <DocsIndexedDbContent topic={topic} commandMenu={commandMenu} />
     case 'bonus/fractional':
       return <DocsFractionalIndexingContent topic={topic} commandMenu={commandMenu} />
+    case 'bonus/local-first':
+      return <DocsLocalFirstContent topic={topic} commandMenu={commandMenu} />
     default:
       return <DocsTopicStubContent topic={topic} commandMenu={commandMenu} />
   }
