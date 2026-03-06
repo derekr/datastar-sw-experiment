@@ -4784,6 +4784,7 @@ function DocsHypermediaContent({ topic, commandMenu }) {
           <li><strong>Actions</strong> — buttons and inputs describe what the user can do.</li>
         </ul>
         <p>The client doesn't need to know ahead of time what operations are available. The server tells it — in every response.</p>
+        <p>You can do hypermedia with JSON too — the key is including <em>what the client can do</em> in the response. But typical REST APIs with JSON don't do this; they return data and assume the client already knows the available operations.</p>
       </section>
 
       <section class="docs-section">
