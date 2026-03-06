@@ -4808,18 +4808,18 @@ fetch('/api/boards')  // what if this changes?
       <section class="docs-section">
         <h2>How Datastar embraces hypermedia</h2>
         <p>Every HTML response from the server includes all available actions:</p>
-        <pre><code>{`// The server renders this HTML:
+        <pre><code>{`// Form — where to send data
 <form action="/boards" method="POST">
   <input name="title" placeholder="Board title">
   <button type="submit">Create</button>
 </form>
 
-// And this form:
+// Button — what action to trigger
 <button data-on:click="@post('/boards/123/select-mode')">
   Select cards
 </button>
 
-// And this link:
+// Link — where to go next
 <a href="/boards/123">Open board</a>`}</code></pre>
         <p>The client never needs to construct URLs or know which API endpoints exist. The server says "here's what you can do," and Datastar wires it up.</p>
       </section>
