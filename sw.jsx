@@ -66,7 +66,7 @@ app.get('/', async (c) => {
       bus.addEventListener('boards:changed', handler)
 
       // Re-push when global UI changes (command menu open/close/search)
-      const globalUIHandler = () => push('#boards-list', 'outer')
+      const globalUIHandler = () => push('#app', 'inner')
       bus.addEventListener('global:ui', globalUIHandler)
 
       stream.onAbort(() => {
@@ -284,7 +284,7 @@ app.get('/boards/:boardId', async (c) => {
       bus.addEventListener(uiTopic, uiHandler)
 
       // Re-push when global UI changes (command menu open/close/search)
-      const globalUIHandler = () => pushBoard('#board', 'outer')
+      const globalUIHandler = () => pushBoard('#app', 'inner')
       bus.addEventListener('global:ui', globalUIHandler)
 
       stream.onAbort(() => {
