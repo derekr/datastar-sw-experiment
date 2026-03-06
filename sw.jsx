@@ -4875,6 +4875,95 @@ fetch('/api/boards')  // what if this changes?
   )
 }
 
+function DocsMpaContent({ topic, commandMenu }) {
+  return (
+    <DocsInner topic={topic} commandMenu={commandMenu}>
+      <h1>{topic.title}</h1>
+
+      <section class="docs-section">
+        <p>Single-page apps brought client-side routing: the URL changes without a page reload, JavaScript swaps the content, and navigation feels instant. But it came with a cost — complex routing code, hydration mismatches, and a second-class citizen on the web platform.</p>
+        <p>This app takes a different approach: <strong>standard HTML navigation with View Transitions</strong>. No client-side router. Just <code>&lt;a&gt;</code> tags and the browser's native navigation, enhanced with smooth animations.</p>
+      </section>
+
+      <section class="docs-section">
+        <h2>No client-side routing</h2>
+        <p>Every link is a plain <code>&lt;a href="..."&gt;</code>:</p>
+        <pre><code>{`// Plain anchor tag — no router needed
+<a href={base()}>Home</a>
+<a href={\`\${base()}boards/\${board.id}\`}>{board.title}</a>
+<a href={base() + 'docs/core/event-sourcing'}>Docs</a>`}</code></pre>
+        <p>Clicking a link triggers a normal browser navigation. The server returns a new HTML document. View Transitions smooth the transition between pages.</p>
+        <p>This means:</p>
+        <ul class="docs-list">
+          <li><strong>No router code</strong> — no <code>react-router</code>, <code>wouter</code>, or custom routing logic.</li>
+          <li><strong>URL works correctly</strong> — browser back/forward, deep links, sharing all work natively.</li>
+          <li><strong>Progressive enhancement</strong> — works without JavaScript (mostly).</li>
+        </ul>
+      </section>
+
+      <section class="docs-section">
+        <h2>View Transitions API</h2>
+        <p>When you navigate between pages, the browser normally does a hard cut — old page gone, new page appears. View Transitions let you animate that change:</p>
+        <pre><code>{`// CSS: name elements for transition
+.card { view-transition-name: card-123; }
+.board-title { view-transition-name: board-title; }
+
+// On navigation, browser captures old state,
+// renders new state, and animates between them
+// No JavaScript needed beyond the CSS`}</code></pre>
+        <p>The key is <code>view-transition-name</code> — give elements the same name across pages, and the browser morphs them. In this app, board cards animate into the board view, columns slide into place.</p>
+      </section>
+
+      <section class="docs-section">
+        <h2>Speculation Rules: prefetching</h2>
+        <p>The downside of MPA is latency — every click is a full page round-trip. Speculation Rules fix this by prefetching pages before you click:</p>
+        <pre><code>{`<script type="speculationrules">{JSON.stringify({
+  prefetch: [{
+    source: 'document',
+    where: { href_matches: '/boards/*' },
+    eagerness: 'moderate',
+  }]
+})}</script>`}</code></pre>
+        <p>When the browser sees a link to a board page, it prefetches the HTML in the background. When you click, the page loads instantly from cache.</p>
+        <p>This app enables speculation rules on non-board pages (the board list, docs). Board pages are excluded because they're heavier and the SSE connection already keeps them fresh.</p>
+      </section>
+
+      <section class="docs-section">
+        <h2>Contrast with SPA client-side routing</h2>
+        <table class="docs-table">
+          <thead>
+            <tr><th>SPA Routing</th><th>MPA + View Transitions</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>URL routing in JavaScript</td><td>Native browser navigation</td></tr>
+            <tr><td>Hydration required</td><td>No hydration</td></tr>
+            <tr><td>Back/forward needs handling</td><td>Works automatically</td></tr>
+            <tr><td>Deep links require server config</td><td>Deep links just work</td></tr>
+            <tr><td>Bundle includes router</td><td>No router in bundle</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section class="docs-section">
+        <h2>When to use which</h2>
+        <p>SPA routing makes sense for:</p>
+        <ul class="docs-list">
+          <li>Apps that need instant navigation without full page loads (like Gmail)</li>
+          <li>Heavy client-side state that would be expensive to re-render</li>
+        </ul>
+        <p>MPA + View Transitions makes sense for:</p>
+        <ul class="docs-list">
+          <li>Content-heavy sites where SEO matters</li>
+          <li>Server-driven apps like this one</li>
+          <li>Simpler codebases — no routing abstraction</li>
+        </ul>
+      </section>
+
+      <DocsPager topic={topic} />
+    </DocsInner>
+  )
+}
+
 function DocsServiceWorkerContent({ topic, commandMenu }) {
   return (
     <DocsInner topic={topic} commandMenu={commandMenu}>
@@ -5024,14 +5113,16 @@ if (import.meta.hot) {
 // Topic content lookup — returns topic-specific component or falls back to stub
 function DocsTopicContent({ topic, commandMenu }) {
   switch (topic.slug) {
+    case 'core/hypermedia':
+      return <DocsHypermediaContent topic={topic} commandMenu={commandMenu} />
     case 'core/event-sourcing':
       return <DocsEventSourcingContent topic={topic} commandMenu={commandMenu} />
     case 'core/sse-fat-morph':
       return <DocsFatMorphingContent topic={topic} commandMenu={commandMenu} />
     case 'core/signals':
       return <DocsSignalsContent topic={topic} commandMenu={commandMenu} />
-    case 'core/hypermedia':
-      return <DocsHypermediaContent topic={topic} commandMenu={commandMenu} />
+    case 'core/mpa':
+      return <DocsMpaContent topic={topic} commandMenu={commandMenu} />
     case 'bonus/sw':
       return <DocsServiceWorkerContent topic={topic} commandMenu={commandMenu} />
     default:
