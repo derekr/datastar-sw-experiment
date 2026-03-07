@@ -4,7 +4,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build"
+    "build": "vite build",
+    "dev:bun": "bun run runtime/bun-entry.ts"
   },
   "dependencies": {
     "fractional-indexing": "^3.2.0",

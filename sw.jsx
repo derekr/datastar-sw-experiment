@@ -13,11 +13,13 @@ import { boardUIState, globalUIState, getUIState, emitGlobalUI, emitUI } from '.
 import { replayToPosition, loadTimeTravelEvents, loadCardEvents } from './lib/time-travel.js'
 import { cmpPosition, positionForIndex } from './lib/position.js'
 import { dsePatch } from './lib/sse.js'
-import { getTabCount, notifyTabChange, notifyConnectionChange } from './lib/tabs.js'
+import { getTabCount, notifyTabChange, notifyConnectionChange, registerConnectionListeners } from './lib/tabs.js'
 import { BOARD_TEMPLATES, getTemplateHash } from './lib/templates.js'
 import { getBoards, getBoard, getConnectionStatus, boardIdFromColumn, boardIdFromCard } from './lib/queries.js'
 import { initialize, rebuildProjection } from './lib/init.js'
 import { buildCommandMenuResults } from './lib/command-menu.js'
+import { setRuntimeConfig } from './lib/runtime.js'
+import { registerServiceWorkerRuntime } from './runtime/sw-entry.js'
 
 // Components
 import { Board, SelectionBar, eventLabel, StatusChip, LabelPicker } from './components/kanban.jsx'
@@ -31,6 +33,12 @@ import { DocsPage, DocsTopicContent, DocsInner, DocsIndexContent } from './compo
 // --- Hono app ---
 
 const app = new Hono()
+
+export function createApp(runtimeConfig = {}) {
+  setRuntimeConfig(runtimeConfig)
+  registerConnectionListeners()
+  return app
+}
 
 // Ensure DB is initialized before every route (SW may restart between requests)
 app.use(async (c, next) => {
@@ -1147,35 +1155,4 @@ app.post('/rebuild', async (c) => {
 })
 
 // --- Service Worker lifecycle ---
-
-self.addEventListener('install', () => self.skipWaiting())
-self.addEventListener('activate', (event) => event.waitUntil(self.clients.claim()))
-self.addEventListener('fetch', (event) => {
-  const url = new URL(event.request.url)
-  if (url.origin !== self.location.origin) return
-  // Let static assets fall through to network/cache.
-  // The SW only serves HTML (Hono routes) and SSE streams — all other file
-  // types (JS, CSS, images, manifest) are served by the host (Vite / GH Pages).
-  if (/\.(js|css|png|svg|ico|woff2?|json|webmanifest)(\?.*)?$/.test(url.pathname)) return
-  // Strip the SW scope prefix so Hono routes match regardless of base path.
-  // e.g. /datastar-sw-experiment/boards/123 → /boards/123
-  const scope = new URL(self.registration.scope).pathname
-  if (scope !== '/' && url.pathname.startsWith(scope)) {
-    url.pathname = '/' + url.pathname.slice(scope.length)
-  }
-  // Spread only safe RequestInit properties — mode:'navigate' is not
-  // settable via the Request constructor, so we omit it (defaults to 'cors').
-  // duplex:'half' is required when body is a ReadableStream.
-  const init = {
-    method: event.request.method,
-    headers: event.request.headers,
-    redirect: event.request.redirect,
-    signal: event.request.signal,
-  }
-  if (event.request.body) {
-    init.body = event.request.body
-    init.duplex = 'half'
-  }
-  const req = new Request(url, init)
-  event.respondWith(app.fetch(req))
-})
+registerServiceWorkerRuntime(createApp())
