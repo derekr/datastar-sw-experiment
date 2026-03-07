@@ -57,14 +57,14 @@ export function DocsSidebar({ currentSlug }) {
   const core = DOCS_TOPICS.filter(t => t.section === 'core')
   const bonus = DOCS_TOPICS.filter(t => t.section === 'bonus')
   return (
-    <nav class="docs-sidebar" id="docs-sidebar">
+    <nav class="docs-sidebar" id="docs-sidebar" aria-label="Docs navigation">
       <a href={base()} class="docs-sidebar-home"><Icon name="lucide:arrow-left" /> Back to app</a>
-      <a href={`${base()}docs`} class={`docs-sidebar-link docs-sidebar-overview${!currentSlug ? ' docs-sidebar-link--active' : ''}`}>Overview</a>
+      <a href={`${base()}docs`} class={`docs-sidebar-link docs-sidebar-overview${!currentSlug ? ' docs-sidebar-link--active' : ''}`} aria-current={!currentSlug ? 'page' : undefined}>Overview</a>
       <div class="docs-sidebar-section">
         <h3 class="docs-sidebar-heading">Core Concepts</h3>
         <ul class="docs-sidebar-list">
           {core.map(t => (
-            <li><a href={`${base()}docs/${t.slug}`} class={`docs-sidebar-link${currentSlug === t.slug ? ' docs-sidebar-link--active' : ''}`}>{t.title}</a></li>
+            <li><a href={`${base()}docs/${t.slug}`} class={`docs-sidebar-link${currentSlug === t.slug ? ' docs-sidebar-link--active' : ''}`} aria-current={currentSlug === t.slug ? 'page' : undefined}>{t.title}</a></li>
           ))}
         </ul>
       </div>
@@ -72,7 +72,7 @@ export function DocsSidebar({ currentSlug }) {
         <h3 class="docs-sidebar-heading">Bonus</h3>
         <ul class="docs-sidebar-list">
           {bonus.map(t => (
-            <li><a href={`${base()}docs/${t.slug}`} class={`docs-sidebar-link${currentSlug === t.slug ? ' docs-sidebar-link--active' : ''}`}>{t.title}</a></li>
+            <li><a href={`${base()}docs/${t.slug}`} class={`docs-sidebar-link${currentSlug === t.slug ? ' docs-sidebar-link--active' : ''}`} aria-current={currentSlug === t.slug ? 'page' : undefined}>{t.title}</a></li>
           ))}
         </ul>
       </div>
@@ -160,7 +160,7 @@ export function DocsIndexContent({ commandMenu }) {
         <div class="docs-toc-grid">
           {core.map((t, i) => (
             <a href={`${base()}docs/${t.slug}`} class="docs-toc-card">
-              <span class="docs-toc-num">{i + 1}</span>
+              <span class="docs-toc-num" aria-hidden="true">{i + 1}</span>
               <h3>{t.title}</h3>
             </a>
           ))}

@@ -285,6 +285,7 @@ export function TimeTravelBar({ boardId, events, pos }) {
           id="tt-prev"
           type="button"
           class="tt-step"
+          title="Previous event"
           disabled={pos <= 0}
           data-on:click={`fetch('${seekUrl}', {method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'position=${pos - 1}'})`}
         ><Icon name="lucide:chevron-left" /></button>
@@ -294,12 +295,14 @@ export function TimeTravelBar({ boardId, events, pos }) {
           min="0"
           max={String(events.length - 1)}
           value={String(pos)}
+          aria-label="Event history position"
           data-on:input__debounce_100ms={`fetch('${seekUrl}', {method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'position='+evt.target.value})`}
         />
         <button
           id="tt-next"
           type="button"
           class="tt-step"
+          title="Next event"
           disabled={pos >= events.length - 1}
           data-on:click={`fetch('${seekUrl}', {method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'position=${pos + 1}'})`}
         ><Icon name="lucide:chevron-right" /></button>

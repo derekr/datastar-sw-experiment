@@ -50,10 +50,13 @@ export function CardDetail({ card, column, columns, board, events, commandMenu, 
 
           <div class="card-detail-section">
             <h3 class="card-detail-section-title">Column</h3>
-            <div class="card-detail-column-picker">
+            <div class="card-detail-column-picker" role="listbox" aria-label="Move to column">
               {columns.map(col => (
                 <button
                   class={`card-detail-col-btn${col.id === card.columnId ? ' card-detail-col-btn--active' : ''}`}
+                  role="option"
+                  aria-selected={col.id === card.columnId ? 'true' : 'false'}
+                  aria-pressed={col.id === card.columnId ? 'true' : 'false'}
                   data-on:click={col.id !== card.columnId ? `@post('${base()}cards/${card.id}/move-to/${col.id}')` : 'void 0'}
                   disabled={col.id === card.columnId}
                 >{col.title}</button>

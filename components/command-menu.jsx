@@ -44,8 +44,8 @@ export function CommandMenu({ query, results }) {
 
   let flatIdx = 0
   return (
-    <div id="command-menu" class="command-menu-backdrop" data-on:click={`if(window.revertTheme)revertTheme();@post('${base()}command-menu/close')`}>
-      <div class="command-menu-panel" data-on:click__stop="void 0" data-signals={`{cmdIdx: 0, cmdCount: ${results.length}}`}>
+    <div id="command-menu" class="command-menu-backdrop" role="dialog" aria-label="Command menu" aria-modal="true" data-on:click={`if(window.revertTheme)revertTheme();@post('${base()}command-menu/close')`}>
+      <div class="command-menu-panel" role="presentation" data-on:click__stop="void 0" data-signals={`{cmdIdx: 0, cmdCount: ${results.length}}`}>
         <form id="command-menu-form" data-on:submit__prevent="void 0">
           <div class="command-menu-input-wrap">
             <span class="command-menu-icon"><Icon name="lucide:search" /></span>
@@ -54,12 +54,15 @@ export function CommandMenu({ query, results }) {
               class="command-menu-input"
               type="text"
               placeholder="Search boards, cards, actions..."
+              aria-label="Search"
+              aria-autocomplete="list"
+              aria-activedescendant={`cmd-result-${results[0]?.id || ''}`}
               value={query}
               autocomplete="off"
               data-on:input__debounce_150ms={`$cmdIdx = 0; @post('${base()}command-menu/search', {contentType: 'form'})`}
               data-on:keydown={`
-                if (event.key === 'ArrowDown') { event.preventDefault(); $cmdIdx = ($cmdIdx + 1) % $cmdCount; requestAnimationFrame(function(){var a=document.querySelector('.command-menu-result--active');if(a&&a.dataset.themePreview&&window.previewTheme)previewTheme(a.dataset.themePreview)}); }
-                else if (event.key === 'ArrowUp') { event.preventDefault(); $cmdIdx = ($cmdIdx - 1 + $cmdCount) % $cmdCount; requestAnimationFrame(function(){var a=document.querySelector('.command-menu-result--active');if(a&&a.dataset.themePreview&&window.previewTheme)previewTheme(a.dataset.themePreview)}); }
+                if (event.key === 'ArrowDown') { event.preventDefault(); $cmdIdx = ($cmdIdx + 1) % $cmdCount; requestAnimationFrame(function(){var a=document.querySelector('.command-menu-result--active');if(a&&a.id){document.getElementById('command-menu-input').setAttribute('aria-activedescendant', a.id);}if(a&&a.dataset.themePreview&&window.previewTheme)previewTheme(a.dataset.themePreview)}); }
+                else if (event.key === 'ArrowUp') { event.preventDefault(); $cmdIdx = ($cmdIdx - 1 + $cmdCount) % $cmdCount; requestAnimationFrame(function(){var a=document.querySelector('.command-menu-result--active');if(a&&a.id){document.getElementById('command-menu-input').setAttribute('aria-activedescendant', a.id);}if(a&&a.dataset.themePreview&&window.previewTheme)previewTheme(a.dataset.themePreview)}); }
                 else if (event.key === 'Enter') { event.preventDefault(); var a = document.querySelector('.command-menu-result--active'); if (a) a.click(); }
                 else if (event.key === 'Escape') { event.preventDefault(); if(window.revertTheme)revertTheme(); @post('${base()}command-menu/close'); }
               `}
@@ -68,18 +71,19 @@ export function CommandMenu({ query, results }) {
           </div>
         </form>
         {results.length > 0 ? (
-          <div class="command-menu-results">
+          <div class="command-menu-results" role="listbox">
             {groups.map(g => {
               const section = (
                 <div id={`cmd-group-${g.name.toLowerCase().replace(/\s+/g, '-')}`} class="command-menu-section">
                   <div class="command-menu-section-header">{g.name}</div>
-                  <ul class="command-menu-section-list">
+                  <ul class="command-menu-section-list" role="listbox">
                     {g.items.map(r => {
                       const idx = flatIdx++
                       return (
                         <li
                           id={`cmd-result-${r.id}`}
                           class="command-menu-result"
+                          role="option"
                           data-class={`{'command-menu-result--active': $cmdIdx === ${idx}}`}
                           data-on:click={clickHandler(r)}
                           {...(r.themeId ? { 'data-theme-preview': r.themeId, 'data-on:mouseenter': `if(window.previewTheme)previewTheme('${r.themeId}')` } : {})}
