@@ -358,7 +358,7 @@ export function StatusChip({ isOnline, unsyncedCount, hasSyncConfig }) {
   return <span id="status-chip" class="status-chip status-chip--synced" title="All events synced">Synced</span>
 }
 
-export function Board({ board, columns, cards, uiState, tabCount, connStatus, commandMenu }) {
+export function Board({ board, columns, cards, uiState, tabCount, connStatus, commandMenu, CommandMenu }) {
   const isTimeTraveling = uiState?.timeTravelPos >= 0
   const isSelecting = !isTimeTraveling && uiState?.selectionMode
   const isEditingTitle = !isTimeTraveling && uiState?.editingBoardTitle
@@ -461,7 +461,12 @@ export function Board({ board, columns, cards, uiState, tabCount, connStatus, co
       {uiState?.showHelp && (
         <HelpOverlay boardId={board.id} />
       )}
-      {commandMenu}
+      {commandMenu && (
+        <CommandMenu
+          query={commandMenu.query}
+          results={commandMenu.results || []}
+        />
+      )}
     </div>
   )
 }
