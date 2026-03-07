@@ -204,7 +204,7 @@ export function ColumnSheet({ col, colIndex, columnCount, boardId }) {
   )
 }
 
-export function Column({ col, cards, columnCount, uiState, columns, boardId }) {
+export function Column({ col, cards, columnCount, uiState, boardId }) {
   const colCards = cards
     .filter(c => c.columnId === col.id)
     .sort(cmpPosition)
@@ -434,7 +434,7 @@ export function Board({ board, columns, cards, uiState, tabCount, connStatus, co
       )}
       <div class="columns">
         {columns.map(col => (
-          <Column col={col} cards={cards} columnCount={columns.length} uiState={uiState} columns={columns} boardId={board.id} />
+          <Column col={col} cards={cards} columnCount={columns.length} uiState={uiState} boardId={board.id} />
         ))}
       </div>
       <form
