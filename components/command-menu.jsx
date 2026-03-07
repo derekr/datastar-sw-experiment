@@ -71,13 +71,14 @@ export function CommandMenu({ query, results }) {
           <div class="command-menu-results">
             {groups.map(g => {
               const section = (
-                <div class="command-menu-section" key={g.name}>
+                <div id={`cmd-group-${g.name.toLowerCase().replace(/\s+/g, '-')}`} class="command-menu-section">
                   <div class="command-menu-section-header">{g.name}</div>
                   <ul class="command-menu-section-list">
                     {g.items.map(r => {
                       const idx = flatIdx++
                       return (
                         <li
+                          id={`cmd-result-${r.id}`}
                           class="command-menu-result"
                           data-class={`{'command-menu-result--active': $cmdIdx === ${idx}}`}
                           data-on:click={clickHandler(r)}
