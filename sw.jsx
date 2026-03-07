@@ -284,7 +284,7 @@ app.get('/boards/:boardId', async (c) => {
       bus.addEventListener(uiTopic, uiHandler)
 
       // Re-push when global UI changes (command menu open/close/search)
-      const globalUIHandler = () => pushBoard('#app', 'inner')
+      const globalUIHandler = () => pushBoard('#board', 'outer')
       bus.addEventListener('global:ui', globalUIHandler)
 
       stream.onAbort(() => {
