@@ -46,7 +46,7 @@ app.get('/', async (c) => {
       const templateHashes = await Promise.all(BOARD_TEMPLATES.map(async t => ({ id: t.id, title: t.title, description: t.description, hash: await getTemplateHash(t) })))
       const push = async (selector, mode, opts) => {
         const boards = await getBoards()
-        await stream.writeSSE(dsePatch(selector, <BoardsList boards={boards} templates={templateHashes} commandMenu={globalUIState.commandMenu} />, mode, opts))
+        await stream.writeSSE(dsePatch(selector, <BoardsList boards={boards} templates={templateHashes} commandMenu={globalUIState.commandMenu} CommandMenu={CommandMenu} />, mode, opts))
       }
 
       const handler = (e) => {
@@ -81,7 +81,7 @@ app.get('/', async (c) => {
 
   const boards = await getBoards()
   const templateHashes = await Promise.all(BOARD_TEMPLATES.map(async t => ({ id: t.id, title: t.title, description: t.description, hash: await getTemplateHash(t) })))
-  return c.html('<!DOCTYPE html>' + (<Shell path="/"><BoardsList boards={boards} templates={templateHashes} commandMenu={globalUIState.commandMenu} /></Shell>).toString())
+  return c.html('<!DOCTYPE html>' + (<Shell path="/"><BoardsList boards={boards} templates={templateHashes} commandMenu={globalUIState.commandMenu} CommandMenu={CommandMenu} /></Shell>).toString())
 })
 
 // Command: create board
@@ -269,7 +269,7 @@ app.get('/boards/:boardId', async (c) => {
         if (!data) return
         const tabCount = await getTabCount(boardId)
         const connStatus = await getConnectionStatus()
-        await stream.writeSSE(dsePatch(selector, <Board board={data.board} columns={data.columns} cards={data.cards} uiState={ui} tabCount={tabCount} connStatus={connStatus} commandMenu={globalUIState.commandMenu} />, mode, opts))
+        await stream.writeSSE(dsePatch(selector, <Board board={data.board} columns={data.columns} cards={data.cards} uiState={ui} tabCount={tabCount} connStatus={connStatus} commandMenu={globalUIState.commandMenu} CommandMenu={CommandMenu} />, mode, opts))
         performance?.mark('pushBoard-end')
         performance?.measure('pushBoard', 'pushBoard-start', 'pushBoard-end')
       }
@@ -305,7 +305,7 @@ app.get('/boards/:boardId', async (c) => {
   const connStatus = await getConnectionStatus()
   return c.html('<!DOCTYPE html>' + (
     <Shell path={`/boards/${boardId}`}>
-      {data ? <Board board={data.board} columns={data.columns} cards={data.cards} uiState={ui} tabCount={0} connStatus={connStatus} commandMenu={globalUIState.commandMenu} /> : <p>Board not found</p>}
+      {data ? <Board board={data.board} columns={data.columns} cards={data.cards} uiState={ui} tabCount={0} connStatus={connStatus} commandMenu={globalUIState.commandMenu} CommandMenu={CommandMenu} /> : <p>Board not found</p>}
     </Shell>
   ).toString())
 })
@@ -328,7 +328,7 @@ app.get('/boards/:boardId/cards/:cardId', async (c) => {
         const col = columns.find(c => c.id === card.columnId)
         const events = await loadCardEvents(cardId)
         await stream.writeSSE(dsePatch(selector,
-          <CardDetail card={card} column={col} columns={columns} board={board} events={events} commandMenu={globalUIState.commandMenu} />,
+          <CardDetail card={card} column={col} columns={columns} board={board} events={events} commandMenu={globalUIState.commandMenu} CommandMenu={CommandMenu} />,
           mode
         ))
       }
@@ -368,7 +368,7 @@ app.get('/boards/:boardId/cards/:cardId', async (c) => {
   const events = await loadCardEvents(cardId)
   return c.html('<!DOCTYPE html>' + (
     <Shell path={`/boards/${boardId}/cards/${cardId}`}>
-      <CardDetail card={card} column={col} columns={columns} board={board} events={events} commandMenu={globalUIState.commandMenu} />
+      <CardDetail card={card} column={col} columns={columns} board={board} events={events} commandMenu={globalUIState.commandMenu} CommandMenu={CommandMenu} />
     </Shell>
   ).toString())
 })
