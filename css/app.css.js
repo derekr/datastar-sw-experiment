@@ -166,7 +166,7 @@ input:not(#_), textarea:not(#_), select:not(#_) { font-size: max(1rem, 16px); }
 }
 .template-card:hover {
   border-color: var(--primary-7);
-  background: var(--neutral-3);
+  background: var(--neutral-4);
 }
 .template-card:active {
   background: var(--neutral-5);
@@ -421,7 +421,7 @@ input:not(#_), textarea:not(#_), select:not(#_) { font-size: max(1rem, 16px); }
 }
 .label-swatch:hover { transform: scale(1.2); }
 .label-swatch--active {
-  border-color: #fff;
+  border-color: var(--neutral-1);
   box-shadow: 0 0 0 2px var(--swatch-color);
 }
 .label-swatch--lg {
@@ -1155,7 +1155,7 @@ html:active-view-transition-type(card-collapse) ::view-transition-new(root) {
   box-sizing: border-box;
 }
 .card-detail-title-input:focus {
-  border-color: var(--primary-9);
+  border-color: var(--primary-7);
   outline: none;
   background: var(--neutral-3);
 }
@@ -1295,7 +1295,6 @@ html:active-view-transition-type(card-collapse) ::view-transition-new(root) {
 }
 .btn--danger:hover { background: var(--error-6); }
 
-::view-transition-new(*) { animation: none; }
 /* Columns above default during view transitions so moving column renders on top */
 ::view-transition-group(*.col) { z-index: 50; }
 
