@@ -1,8 +1,6 @@
 export const DOCS_CSS = `
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
-/* Lucide icons via CSS mask-image */
-${__LUCIDE_ICON_CSS__}
 .icon--lucide { vertical-align: -0.125em; }
 
 body {

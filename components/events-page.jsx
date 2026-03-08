@@ -3,6 +3,7 @@ import { Icon } from './icon.jsx'
 import { base } from '../lib/base.js'
 import { raw } from 'hono/html'
 import { EVENTS_CSS } from '../css/events.css.js'
+import { getAssetConfig } from '../lib/assets.js'
 
 export function typeClass(type) {
   if (type.includes('deleted') || type.includes('Deleted')) return 'type type--delete'
@@ -67,6 +68,7 @@ export function EventList({ events, boardFilter, boards }) {
 }
 
 export function EventsPage({ boards, boardFilter }) {
+  const assets = getAssetConfig()
   return (
     <html lang="en">
       <head>
@@ -76,9 +78,9 @@ export function EventsPage({ boards, boardFilter }) {
         <link rel="manifest" href={`${base()}manifest.json`} />
         <link rel="icon" href={`${base()}icon.svg`} type="image/svg+xml" />
         <script>{raw(`(function(){var t=localStorage.getItem('theme')||'system';var dark=t==='dark'||(t!=='light'&&matchMedia('(prefers-color-scheme:dark)').matches);document.documentElement.dataset.theme=dark?'dark':'light';var m=document.getElementById('theme-color-meta');if(m)m.content=dark?'#121017':'#f4eefa'})()`)}</script>
-        <link rel="stylesheet" href={`${base()}${__STELLAR_CSS__}`} />
+        <link rel="stylesheet" href={`${base()}${assets.stellarCssPath}`} />
         <title>Event Log{boardFilter && boards ? ` — ${boards.find(b => b.id === boardFilter)?.title || ''}` : ''}</title>
-        <style>{raw(EVENTS_CSS)}</style>
+        <style>{raw(EVENTS_CSS + '\n' + (assets.lucideIconCSS || ''))}</style>
         <script
           type="module"
           src="https://cdn.jsdelivr.net/gh/starfederation/datastar@1.0.0-RC.8/bundles/datastar.js"

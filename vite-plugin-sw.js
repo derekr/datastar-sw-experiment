@@ -2,27 +2,7 @@ import { build } from 'vite';
 import path from 'path';
 import { createHash } from 'crypto';
 import fs from 'fs';
-import { createRequire } from 'module';
-import { getIconsCSS } from '@iconify/utils';
-
-// Icons used by the app. At build time, getIconsCSS() generates CSS mask-image
-// rules from @iconify-json/lucide — icons live entirely in the stylesheet.
-// No web component, no JS, no flash.
-const USED_ICONS = [
-  'x', 'square-check', 'square', 'pencil', 'arrow-up-right',
-  'arrow-left', 'arrow-right', 'plus', 'chevron-left', 'chevron-right',
-  'search', 'book-open', 'zap', 'layout-dashboard', 'tag', 'columns-3',
-];
-
-function buildIconCSS() {
-  const require = createRequire(import.meta.url);
-  const lucide = require('@iconify-json/lucide/icons.json');
-  return getIconsCSS(lucide, USED_ICONS, {
-    iconSelector: '.icon--{prefix}--{name}',
-    commonSelector: '.icon--{prefix}',
-    overrideSelector: '.icon--{prefix}.icon--{prefix}--{name}',
-  });
-}
+import { buildIconCSS } from './lib/icon-css.js';
 
 // Assets to bundle with content hashes.
 // source: path relative to project root (the actual source file)

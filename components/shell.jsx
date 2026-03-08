@@ -2,8 +2,10 @@
 import { raw } from 'hono/html'
 import { CSS } from '../css/app.css.js'
 import { base } from '../lib/base.js'
+import { getAssetConfig } from '../lib/assets.js'
 
 export function Shell({ path, children }) {
+  const assets = getAssetConfig()
   const routePath = path || '/'
   const isCardPage = /^\/boards\/[^/]+\/cards\//.test(routePath)
   const isBoardPage = routePath.startsWith('/boards/') && !isCardPage
@@ -23,14 +25,14 @@ export function Shell({ path, children }) {
         <script>{raw(`(function(){var t=localStorage.getItem('theme')||'system';function apply(t){var dark=t==='dark'||(t!=='light'&&matchMedia('(prefers-color-scheme:dark)').matches);document.documentElement.dataset.theme=dark?'dark':'light';var m=document.getElementById('theme-color-meta');if(m)m.content=dark?'#121017':'#f4eefa'}apply(t);matchMedia('(prefers-color-scheme:dark)').addEventListener('change',function(){var t=localStorage.getItem('theme')||'system';if(t==='system')apply(t)});window.applyTheme=function(t){localStorage.setItem('theme',t);apply(t)};window.previewTheme=function(t){apply(t)};window.revertTheme=function(){apply(localStorage.getItem('theme')||'system')}})()`)}</script>
         <link rel="preload" href="https://fonts.bunny.net/inter/files/inter-latin-100-normal.woff2" as="font" type="font/woff2" crossorigin />
         <link rel="preload" href="https://fonts.bunny.net/inter/files/inter-latin-900-normal.woff2" as="font" type="font/woff2" crossorigin />
-        <link rel="stylesheet" href={`${base()}${__STELLAR_CSS__}`} />
+        <link rel="stylesheet" href={`${base()}${assets.stellarCssPath}`} />
         <title>Kanban</title>
-        <style>{raw(CSS)}</style>
+        <style>{raw(CSS + '\n' + (assets.lucideIconCSS || ''))}</style>
         <script
           type="module"
           src="https://cdn.jsdelivr.net/gh/starfederation/datastar@1.0.0-RC.8/bundles/datastar.js"
         ></script>
-        {isBoardPage && <script src={`${base()}${__KANBAN_JS__}`}></script>}
+        {isBoardPage && <script src={`${base()}${assets.kanbanJsPath}`}></script>}
         {!isBoardPage && <script type="speculationrules">{raw(JSON.stringify({
           prefetch: [{
             source: 'document',

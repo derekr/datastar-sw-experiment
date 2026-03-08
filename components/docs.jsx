@@ -6,8 +6,10 @@ import { DOCS_TOPICS } from '../lib/constants.js'
 import { DOCS_CSS } from '../css/docs.css.js'
 import { CSS } from '../css/app.css.js'
 import { base } from '../lib/base.js'
+import { getAssetConfig } from '../lib/assets.js'
 
 export function DocsShell({ title, children }) {
+  const assets = getAssetConfig()
   return (
     <html lang="en">
       <head>
@@ -19,9 +21,9 @@ export function DocsShell({ title, children }) {
         <script>{raw(`(function(){var t=localStorage.getItem('theme')||'system';var dark=t==='dark'||(t!=='light'&&matchMedia('(prefers-color-scheme:dark)').matches);document.documentElement.dataset.theme=dark?'dark':'light';var m=document.getElementById('theme-color-meta');if(m)m.content=dark?'#121017':'#f4eefa'})()`)}</script>
         <link rel="preload" href="https://fonts.bunny.net/inter/files/inter-latin-100-normal.woff2" as="font" type="font/woff2" crossorigin />
         <link rel="preload" href="https://fonts.bunny.net/inter/files/inter-latin-900-normal.woff2" as="font" type="font/woff2" crossorigin />
-        <link rel="stylesheet" href={`${base()}${__STELLAR_CSS__}`} />
+        <link rel="stylesheet" href={`${base()}${assets.stellarCssPath}`} />
         <title>{title ? `${title} — Docs` : 'Docs'}</title>
-        <style>{raw(CSS)}{raw(DOCS_CSS)}</style>
+        <style>{raw(CSS + '\n' + DOCS_CSS + '\n' + (assets.lucideIconCSS || ''))}</style>
         <script
           type="module"
           src="https://cdn.jsdelivr.net/gh/starfederation/datastar@1.0.0-RC.8/bundles/datastar.js"

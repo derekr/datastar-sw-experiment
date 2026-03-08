@@ -19,6 +19,7 @@ import { getBoards, getBoard, getConnectionStatus, boardIdFromColumn, boardIdFro
 import { initialize, rebuildProjection } from './lib/init.js'
 import { buildCommandMenuResults } from './lib/command-menu.js'
 import { setRuntimeConfig, getRuntimeConfig } from './lib/runtime.js'
+import { setAssetConfig } from './lib/assets.js'
 import { registerServiceWorkerRuntime } from './runtime/sw-entry.js'
 
 // Components
@@ -36,6 +37,12 @@ const app = new Hono()
 
 export function createApp(runtimeConfig = {}) {
   setRuntimeConfig(runtimeConfig)
+  const g = globalThis
+  setAssetConfig(runtimeConfig.assets || {
+    stellarCssPath: g.__STELLAR_CSS__ || 'css/stellar.css',
+    kanbanJsPath: g.__KANBAN_JS__ || 'eg-kanban.js',
+    lucideIconCSS: g.__LUCIDE_ICON_CSS__ || '',
+  })
   registerConnectionListeners()
   return app
 }

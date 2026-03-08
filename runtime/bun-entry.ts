@@ -2,18 +2,13 @@ import { Hono } from 'hono'
 import { serveStatic } from 'hono/bun'
 import { useDbAdapter } from '../lib/db.js'
 import { createSqliteAdapter } from '../lib/db/sqlite-adapter.js'
+import { buildIconCSS } from '../lib/icon-css.js'
 
 declare const Bun: any
 
 const basePath = process.env.BASE_PATH || '/'
 const port = Number(process.env.PORT || 3000)
 const boardConnections = new Map<string, number>()
-
-// Provide non-Vite runtime define fallbacks for source execution in Bun.
-// Asset decoupling is tracked separately in datastar_sw-xwdh.
-;(globalThis as any).__STELLAR_CSS__ = 'css/stellar.css'
-;(globalThis as any).__KANBAN_JS__ = 'eg-kanban.js'
-;(globalThis as any).__LUCIDE_ICON_CSS__ = ''
 
 // Configure SQLite adapter before loading the shared app module.
 // @ts-ignore - bun:sqlite is available at runtime in Bun
@@ -25,6 +20,11 @@ const { createApp } = await import('../sw.jsx')
 
 const app = createApp({
   basePath,
+  assets: {
+    stellarCssPath: 'css/stellar.css',
+    kanbanJsPath: 'eg-kanban.js',
+    lucideIconCSS: buildIconCSS(),
+  },
   matchClients: async () => [],
   isOnline: () => true,
   onBoardStreamOpen: (boardId: string) => {
