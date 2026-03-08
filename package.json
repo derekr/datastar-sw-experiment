@@ -5,7 +5,8 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "dev:bun": "bun run runtime/bun-entry.ts"
+    "dev:bun": "bun run runtime/bun-entry.ts",
+    "test:browser": "vitest --browser --run"
   },
   "dependencies": {
     "fractional-indexing": "^3.2.0",
@@ -15,6 +16,9 @@
   "devDependencies": {
     "@iconify-json/lucide": "^1.2.95",
     "@iconify/utils": "^3.1.0",
+    "@vitest/browser": "^3.2.4",
+    "playwright": "^1.54.2",
+    "vitest": "^3.2.4",
     "vite": "^8.0.0-beta.16"
   },
   "packageManager": "pnpm@10.5.2"
