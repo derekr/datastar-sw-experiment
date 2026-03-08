@@ -2,7 +2,7 @@ import { setRuntimeConfig } from '../lib/runtime.js'
 import { registerConnectionListeners } from '../lib/tabs.js'
 
 export function registerServiceWorkerRuntime(app) {
-  if (typeof self === 'undefined' || !self.addEventListener) return
+  if (typeof self === 'undefined' || !self.addEventListener || !self.registration?.scope || !self.clients?.claim) return
 
   const scopePath = new URL(self.registration.scope).pathname
   setRuntimeConfig({

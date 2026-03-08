@@ -18,7 +18,7 @@ import { BOARD_TEMPLATES, getTemplateHash } from './lib/templates.js'
 import { getBoards, getBoard, getConnectionStatus, boardIdFromColumn, boardIdFromCard } from './lib/queries.js'
 import { initialize, rebuildProjection } from './lib/init.js'
 import { buildCommandMenuResults } from './lib/command-menu.js'
-import { setRuntimeConfig } from './lib/runtime.js'
+import { setRuntimeConfig, getRuntimeConfig } from './lib/runtime.js'
 import { registerServiceWorkerRuntime } from './runtime/sw-entry.js'
 
 // Components
@@ -260,6 +260,9 @@ app.get('/boards/:boardId', async (c) => {
 
   if (c.req.header('Datastar-Request') === 'true') {
     return streamSSE(c, async (stream) => {
+      getRuntimeConfig().onBoardStreamOpen?.(boardId)
+      notifyTabChange(boardId)
+
       const pushBoard = async (selector, mode, opts) => {
         performance?.mark('pushBoard-start')
         const ui = getUIState(boardId)
@@ -296,6 +299,7 @@ app.get('/boards/:boardId', async (c) => {
       bus.addEventListener('global:ui', globalUIHandler)
 
       stream.onAbort(() => {
+        getRuntimeConfig().onBoardStreamClose?.(boardId)
         bus.removeEventListener(topic, handler)
         bus.removeEventListener(uiTopic, uiHandler)
         bus.removeEventListener('global:ui', globalUIHandler)
@@ -303,7 +307,6 @@ app.get('/boards/:boardId', async (c) => {
       })
 
       await pushBoard('#app', 'inner')
-      notifyTabChange(boardId)
       while (!stream.closed) { await stream.sleep(30000) }
     })
   }
