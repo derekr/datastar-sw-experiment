@@ -25,6 +25,13 @@ export function registerServiceWorkerRuntime(app) {
   self.addEventListener('fetch', (event) => {
     const url = new URL(event.request.url)
     if (url.origin !== self.location.origin) return
+    // On page navigations, trigger a SW update check in the background.
+    // Combined with updateViaCache:'none' (set at registration), this ensures
+    // every navigation checks for a new SW, bypassing Safari's aggressive
+    // script caching that can keep stale SWs alive beyond HTTP max-age.
+    if (event.request.mode === 'navigate') {
+      event.waitUntil(self.registration.update().catch(() => {}))
+    }
     // Let static assets fall through to network/cache.
     // The SW only serves HTML (Hono routes) and SSE streams — all other file
     // types (JS, CSS, images, manifest) are served by the host (Vite / GH Pages).
