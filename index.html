@@ -20,7 +20,7 @@
     if ('serviceWorker' in navigator) {
       try {
         const swURL = new URL('sw.js', import.meta.url).href;
-        const reg = await navigator.serviceWorker.register(swURL);
+        const reg = await navigator.serviceWorker.register(swURL, { updateViaCache: 'none' });
 
         // Single reload gate — prevents double-reload from both
         // the ready/controllerchange paths firing in sequence.
