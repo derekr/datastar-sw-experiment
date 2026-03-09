@@ -1298,6 +1298,100 @@ if (import.meta.hot) {
   )
 }
 
+export function DocsDualRuntimeContent({ topic, commandMenu }) {
+  return (
+    <DocsInner topic={topic} commandMenu={commandMenu}>
+      <h1>{topic.title}</h1>
+
+      <section class="docs-section">
+        <p>This app runs on two completely different servers — a <strong>service worker</strong> in the browser and a <strong>Bun process</strong> on a real machine — from the same application code. The service worker makes the app self-contained for GitHub Pages. The Bun server is more idiomatic Datastar: a remote server that any client can connect to.</p>
+        <p>The point isn't that you <em>should</em> run Datastar in a service worker. It's that the architecture is portable enough that you <em>can</em>.</p>
+      </section>
+
+      <section class="docs-section">
+        <h2>The shared app</h2>
+        <p>All routing, rendering, event sourcing, and SSE streaming live in <code>sw.jsx</code>. It exports a single function:</p>
+        <pre><code>{`export function createApp(runtimeConfig = {}) {
+  setRuntimeConfig(runtimeConfig)
+  setAssetConfig(runtimeConfig.assets || { ... })
+  return app  // the Hono instance
+}`}</code></pre>
+        <p>This Hono app doesn't know or care where it's running. It calls <code>getRuntimeConfig()</code> when it needs environment-specific behavior — how to count connected tabs, whether it's online, what the base path is. Everything else is shared.</p>
+      </section>
+
+      <section class="docs-section">
+        <h2>Two entry points</h2>
+        <p>Each runtime has a thin adapter that calls <code>createApp()</code> with the right config:</p>
+        <pre><code>{`// runtime/sw-entry.js — runs in the browser
+registerServiceWorkerRuntime(createApp())
+
+// The SW adapter provides:
+//   basePath    → self.registration.scope
+//   matchClients → self.clients.matchAll()
+//   isOnline    → navigator.onLine
+//   DB          → IndexedDB (default, no config needed)`}</code></pre>
+        <pre><code>{`// runtime/bun-entry.ts — runs on a machine
+useDbAdapter(createSqliteAdapter(Database, 'kanban.sqlite'))
+
+const app = createApp({
+  basePath: '/',
+  assets: { stellarCssPath, kanbanJsPath, lucideIconCSS },
+  matchClients: async () => [],
+  isOnline: () => true,
+  countBoardConnections: (id) => connections.get(id) || 0,
+})
+
+// Bun adapter adds:
+//   Static file serving via serveStatic
+//   SQLite instead of IndexedDB
+//   In-memory Map for SSE connection tracking`}</code></pre>
+      </section>
+
+      <section class="docs-section">
+        <h2>What each adapter swaps</h2>
+        <table class="docs-table">
+          <thead>
+            <tr><th>Concern</th><th>Service Worker</th><th>Bun</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Database</td><td>IndexedDB (idb-adapter)</td><td>SQLite (sqlite-adapter)</td></tr>
+            <tr><td>Base path</td><td>SW registration scope</td><td>Environment variable</td></tr>
+            <tr><td>Tab counting</td><td><code>self.clients.matchAll()</code></td><td>In-memory connection Map</td></tr>
+            <tr><td>Online status</td><td><code>navigator.onLine</code> + events</td><td>Always online</td></tr>
+            <tr><td>Static assets</td><td>Fall through to network</td><td><code>serveStatic</code> middleware</td></tr>
+            <tr><td>Lifecycle</td><td>install / activate / idle kill</td><td>Long-running process</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section class="docs-section">
+        <h2>The database adapter</h2>
+        <p>The biggest runtime difference is storage. Both adapters implement the same interface — <code>appendEvents</code>, <code>getEvents</code>, <code>getSnapshot</code>, <code>saveSnapshot</code>, and so on — but against different backends:</p>
+        <pre><code>{`// lib/db.js — defaults to IndexedDB, can be swapped
+let dbAdapter = null
+
+export function useDbAdapter(adapter) {
+  dbAdapter = adapter
+}
+
+// In Bun entry:
+useDbAdapter(createSqliteAdapter(Database, 'kanban.sqlite'))
+
+// In SW: no call needed — defaults to IndexedDB`}</code></pre>
+        <p>The SW uses IndexedDB because it's the only option in a service worker. Bun uses SQLite because it's fast, durable, and handles concurrent reads without the quirks of IndexedDB transactions.</p>
+      </section>
+
+      <section class="docs-section">
+        <h2>Why bother?</h2>
+        <p>The service worker version exists so you can try the app on GitHub Pages with zero setup — no server to run, no database to provision. The Bun version exists to show that the same Datastar patterns work identically with a conventional remote server. Same routes, same SSE streams, same JSX templates, same fat morphs.</p>
+        <p>If you're building a real app with Datastar, the Bun version (or Go, or Python, or any server) is the right starting point. The service worker is the interesting detour.</p>
+      </section>
+
+      <DocsPager topic={topic} />
+    </DocsInner>
+  )
+}
+
 // Topic content lookup — returns topic-specific component or falls back to stub
 export function DocsTopicContent({ topic, commandMenu }) {
   switch (topic.slug) {
@@ -1321,6 +1415,8 @@ export function DocsTopicContent({ topic, commandMenu }) {
       return <DocsLocalFirstContent topic={topic} commandMenu={commandMenu} />
     case 'bonus/brotli':
       return <DocsBrotliContent topic={topic} commandMenu={commandMenu} />
+    case 'bonus/dual-runtime':
+      return <DocsDualRuntimeContent topic={topic} commandMenu={commandMenu} />
     default:
       return <DocsTopicStubContent topic={topic} commandMenu={commandMenu} />
   }

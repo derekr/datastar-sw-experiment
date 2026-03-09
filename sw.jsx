@@ -37,11 +37,10 @@ const app = new Hono()
 
 export function createApp(runtimeConfig = {}) {
   setRuntimeConfig(runtimeConfig)
-  const g = globalThis
   setAssetConfig(runtimeConfig.assets || {
-    stellarCssPath: g.__STELLAR_CSS__ || 'css/stellar.css',
-    kanbanJsPath: g.__KANBAN_JS__ || 'eg-kanban.js',
-    lucideIconCSS: g.__LUCIDE_ICON_CSS__ || '',
+    stellarCssPath: globalThis.__STELLAR_CSS__ || 'css/stellar.css',
+    kanbanJsPath: globalThis.__KANBAN_JS__ || 'eg-kanban.js',
+    lucideIconCSS: globalThis.__LUCIDE_ICON_CSS__ || '',
   })
   registerConnectionListeners()
   return app

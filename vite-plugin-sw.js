@@ -9,8 +9,8 @@ import { buildIconCSS } from './lib/icon-css.js';
 // publicPath: the URL path the SW references (via base() + this value)
 // define: the global constant name injected via Vite's define
 const BUNDLED_ASSETS = [
-  { source: 'css/stellar.css', define: '__STELLAR_CSS__', contentType: 'text/css' },
-  { source: 'eg-kanban.js', define: '__KANBAN_JS__', contentType: 'application/javascript' },
+  { source: 'css/stellar.css', define: 'globalThis.__STELLAR_CSS__', contentType: 'text/css' },
+  { source: 'eg-kanban.js', define: 'globalThis.__KANBAN_JS__', contentType: 'application/javascript' },
 ];
 
 function hashContent(content) {
@@ -83,7 +83,7 @@ export default function serviceWorkerPlugin() {
       }
 
       // Icon CSS (mask-image rules) — same value for dev and prod.
-      defines['__LUCIDE_ICON_CSS__'] = JSON.stringify(buildIconCSS());
+      defines['globalThis.__LUCIDE_ICON_CSS__'] = JSON.stringify(buildIconCSS());
 
       assetDefines = {};
       for (const [key, value] of Object.entries(defines)) {
