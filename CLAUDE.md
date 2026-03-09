@@ -26,6 +26,48 @@ pnpm build        # Production build to dist/
 - **Fewer signals is better** — just enough to communicate intent to the server
 - **Server tracks UI state** — action sheets, selection mode, editing state are all in the SW's in-memory `boardUIState` Map. Mutations push full board morphs with the right UI baked in.
 
+### Why CQRS: what complexity disappears
+
+**Commands don't decide what to return.** In traditional REST, every mutation handler must figure out what data the client needs to update the UI — the full resource? related resources? computed aggregates? This scatters read/formatting logic across every endpoint and causes bugs where the response is missing something the UI needs (move a card, column count doesn't update because the response only returned the card). Here, every command returns `204`. The SSE handler is the single place that reads the full projection and renders `<Board />`. One read path, one render path.
+
+**No stale siblings.** In request-response, after a mutation you must figure out what *else* on the page is now stale — the `queryClient.invalidateQueries` problem. Did creating a card change the column count? The board header badge? You have to manually enumerate what to invalidate, and you inevitably miss things. With SSE push, the bus dispatches `board:<id>:changed`, the SSE handler reads the entire board projection and pushes a complete morph. Everything is consistent by construction because it's all rendered from the same read.
+
+**Multi-client sync is free.** Two tabs with the same board open both have SSE streams subscribed to `board:<id>:changed`. One tab creates a card, `appendEvents` fires the bus event, both streams push. No polling, no separate WebSocket layer, no "refetch on focus" logic. The tab count feature is a concrete example — it falls out of the architecture rather than being bolted on.
+
+**No optimistic update rollback.** Traditional SPAs optimistically update the UI, send the mutation, and roll back on failure. This causes bugs: partial rollbacks, race conditions between concurrent optimistic updates, flicker when the server response disagrees. With CQRS+SSE where the SW is in-process, the latency between command and morph is near-zero, so optimistic updates are unnecessary.
+
+**Command handlers become pure validation + intent.** When a handler doesn't format a response, it focuses entirely on "is this valid?" and "what happened?" The delete column handler (`sw.jsx:552-562`) is: clear the action sheet if needed, create a `column.deleted` event, append it, return 204. No conditional logic about what to include in the response.
+
+**UI state and data state use the same push mechanism.** Action sheets, selection mode, editing state are ephemeral UI concerns that don't warrant events, but `emitUI()` uses the same SSE push path as data mutations. The SSE handler reads `getUIState()` alongside `getBoard()` and renders both into `<Board />`. One state-update pipeline on the client, not two.
+
+### What event sourcing adds (beyond CQRS)
+
+CQRS benefits come from the command/query separation itself. Event sourcing adds:
+
+- **Undo/redo** — `lib/undo.js` builds reverse events by snapshotting state before the forward events. Without event sourcing, undo requires storing before/after snapshots (expensive) or inverse-operation logic per mutation type (brittle).
+- **Time travel** — `replayToPosition` replays events up to a target index to reconstruct past board states. Only possible with the full event history.
+- **Audit trail** — Card detail view shows the event history for that card via `loadCardEvents`. Just a query over the event store.
+- **Idempotent replay** — `appendEvents` deduplicates by event ID (`lib/events.js:175`), making future sync safe: receive the same event twice, it's a no-op.
+- **Schema evolution without migration** — Upcasters (`lib/events.js:4-15`) transform old event formats on read. No data migration needed — add an upcaster and the projection rebuilds correctly.
+
+The cost: the event store grows (mitigated by snapshots in `lib/init.js`), and event schemas are append-only.
+
+### Single-flight mutations vs CQRS+SSE
+
+Single-flight mutations (where the mutation response *is* the updated data, one roundtrip) solve the same problem — keeping the UI in sync — with opposite tradeoffs. Single-flight couples the write path to the read path (the command handler must know what data the UI needs) and only updates the client that made the request. CQRS+SSE decouples them and pushes to all connected clients. In this architecture, single-flight would add response-formatting logic to every command handler for no benefit — the SSE stream is already open and the push latency is near-zero because the SW is in-process.
+
+### Performance characteristics
+
+**The "two roundtrips" objection is mostly wrong here.** The common concern with CQRS is latency from separating command and query. That assumes network latency between command acceptance and read-model update — which doesn't exist when the SW is in-process.
+
+- **SSE stream is already open.** No connection setup cost for the push. The command posts, returns 204, and the bus dispatch is synchronous — the SSE handler calls `pushBoard` immediately within the same microtask cycle.
+- **204 is faster than a formatted response.** The command handler does less work (no reading updated state, no rendering HTML). The total work is the same, but the command returns to the client sooner.
+- **Natural batching.** Multiple rapid mutations (e.g., batch-move selected cards) create multiple events in one `appendEvents` call, one bus notification, one SSE push of the final state. In request-response, each mutation needs its own formatted response.
+- **No over-fetching negotiation.** Every SSE push is the full board render. No client-server negotiation about response shape (GraphQL fields, REST includes, sparse fieldsets). With Idiomorph doing efficient DOM diffing, the actual DOM mutations are minimal regardless of the HTML payload size.
+- **The real cost is the full read on every push.** The SSE handler calls `getBoard()` (reads boards, columns, cards from IDB) and renders full `<Board />` JSX on every mutation. For a kanban board with reasonable card counts this is fast. At scale (thousands of cards), partial pushes or read-model caching would be worth considering. But this cost exists regardless of CQRS — request-response would do the same read to format its response.
+
+Net: same total work as request-response, different distribution, with multi-client sync at zero additional cost.
+
 ## Conventions
 
 ### All client-facing URLs use `base()`
