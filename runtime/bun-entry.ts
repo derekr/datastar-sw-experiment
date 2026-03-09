@@ -1,4 +1,5 @@
 import { Hono } from 'hono'
+import { getCookie, setCookie } from 'hono/cookie'
 import { serveStatic } from 'hono/bun'
 import { useDbAdapter } from '../lib/db.js'
 import { createSqliteAdapter } from '../lib/db/sqlite-adapter.js'
@@ -27,6 +28,14 @@ const app = createApp({
   },
   matchClients: async () => [],
   isOnline: () => true,
+  resolveSessionId: (c: any) => {
+    let sid = getCookie(c, 'session')
+    if (!sid) {
+      sid = crypto.randomUUID()
+      setCookie(c, 'session', sid, { path: '/', httpOnly: true, maxAge: 86400 })
+    }
+    return sid
+  },
   onBoardStreamOpen: (boardId: string) => {
     boardConnections.set(boardId, (boardConnections.get(boardId) || 0) + 1)
   },

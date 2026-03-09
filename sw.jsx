@@ -4,7 +4,7 @@ import { streamSSE } from 'hono/streaming'
 import { generateKeyBetween, generateNKeysBetween } from 'fractional-indexing'
 
 import { base } from './lib/base.js'
-import { dbPromise, bus, ALL_STORES } from './lib/db.js'
+import { dbPromise, bus, ALL_STORES, getRecord } from './lib/db.js'
 import { MAX_IMPORT_EVENTS, ALLOWED_EVENT_TYPES, LABEL_COLORS, DOCS_TOPICS } from './lib/constants.js'
 import { compressToBase64url, decompressFromBase64url } from './lib/compression.js'
 import { createEvent, applyEvent, appendEvents, appendEvent, boardIdForEvent, annotateEventsWithBoardId } from './lib/events.js'
@@ -47,19 +47,23 @@ export function createApp(runtimeConfig = {}) {
 }
 
 // Ensure DB is initialized before every route (SW may restart between requests)
+// If the runtime provides a session resolver (Bun), set sessionId on the context.
 app.use(async (c, next) => {
   await initialize()
+  const resolve = getRuntimeConfig().resolveSessionId
+  if (resolve) c.set('sessionId', await resolve(c))
   await next()
 })
 
 // ── Boards list (index) ──────────────────────────────────────────────────────
 
 app.get('/', async (c) => {
+  const sessionId = c.get('sessionId')
   if (c.req.header('Datastar-Request') === 'true') {
     return streamSSE(c, async (stream) => {
       const templateHashes = await Promise.all(BOARD_TEMPLATES.map(async t => ({ id: t.id, title: t.title, description: t.description, hash: await getTemplateHash(t) })))
       const push = async (selector, mode, opts) => {
-        const boards = await getBoards()
+        const boards = await getBoards(sessionId)
         await stream.writeSSE(dsePatch(selector, <BoardsList boards={boards} templates={templateHashes} commandMenu={globalUIState.commandMenu} CommandMenu={CommandMenu} />, mode, opts))
       }
 
@@ -93,7 +97,7 @@ app.get('/', async (c) => {
     })
   }
 
-  const boards = await getBoards()
+  const boards = await getBoards(sessionId)
   const templateHashes = await Promise.all(BOARD_TEMPLATES.map(async t => ({ id: t.id, title: t.title, description: t.description, hash: await getTemplateHash(t) })))
   return c.html('<!DOCTYPE html>' + (<Shell path="/"><BoardsList boards={boards} templates={templateHashes} commandMenu={globalUIState.commandMenu} CommandMenu={CommandMenu} /></Shell>).toString())
 })
@@ -106,10 +110,12 @@ app.post('/boards', async (c) => {
 
   const boardId = crypto.randomUUID()
   const correlationId = crypto.randomUUID()
+  const sessionId = c.get('sessionId')
   const boardEvent = createEvent('board.created', {
     id: boardId,
     title,
     createdAt: Date.now(),
+    ...(sessionId && { sessionId }),
   }, { correlationId })
   // Seed default columns for the new board — single atomic transaction
   const positions = generateNKeysBetween(null, null, 3)
@@ -221,7 +227,12 @@ app.post('/import', async (c) => {
     const e = { ...evt, id: crypto.randomUUID(), synced: false }
     const d = { ...e.data }
     switch (e.type) {
-      case 'board.created':
+      case 'board.created': {
+        d.id = remap(evt.data.id)
+        const sid = c.get('sessionId')
+        if (sid) d.sessionId = sid
+        break
+      }
       case 'board.titleUpdated':
       case 'board.deleted':
         d.id = remap(evt.data.id)
@@ -257,6 +268,24 @@ app.post('/import', async (c) => {
   const boardEvt = remapped.find(e => e.type === 'board.created')
   const newBoardId = boardEvt ? boardEvt.data.id : null
   return c.json({ boardId: newBoardId, eventCount: remapped.length })
+})
+
+// ── Session guard: reject board access when sessionId doesn't match ──────────
+app.use('/boards/:boardId', async (c, next) => {
+  const sessionId = c.get('sessionId')
+  if (sessionId) {
+    const board = await getRecord('boards', c.req.param('boardId'))
+    if (board && board.sessionId !== sessionId) return c.notFound()
+  }
+  await next()
+})
+app.use('/boards/:boardId/*', async (c, next) => {
+  const sessionId = c.get('sessionId')
+  if (sessionId) {
+    const board = await getRecord('boards', c.req.param('boardId'))
+    if (board && board.sessionId !== sessionId) return c.notFound()
+  }
+  await next()
 })
 
 // ── Board detail ─────────────────────────────────────────────────────────────
@@ -882,7 +911,7 @@ app.post('/command-menu/open', async (c) => {
   if (globalUIState.commandMenu) {
     globalUIState.commandMenu = null
   } else {
-    const results = await buildCommandMenuResults('', context)
+    const results = await buildCommandMenuResults('', context, c.get('sessionId'))
     globalUIState.commandMenu = { query: '', results, context }
   }
   emitGlobalUI()
@@ -903,7 +932,7 @@ app.post('/command-menu/search', async (c) => {
   const cm = globalUIState.commandMenu
   if (!cm) return c.body(null, 204)
 
-  const results = await buildCommandMenuResults(query, cm.context || '/')
+  const results = await buildCommandMenuResults(query, cm.context || '/', c.get('sessionId'))
   cm.query = body.query || ''
   cm.results = results
   emitGlobalUI()
