@@ -83,7 +83,7 @@ export function Shell({ path, children }) {
             // installations — forces conditional requests for sw.js, bypassing
             // HTTP cache (fixes stale SW on GitHub Pages CDN).
             navigator.serviceWorker.ready.then(reg => {
-              navigator.serviceWorker.register(reg.active.scriptURL, { updateViaCache: 'none' })
+              navigator.serviceWorker.register(reg.active.scriptURL, { type: 'module', updateViaCache: 'none' })
                 .then(r => r.update());
               setInterval(() => reg.update(), 60 * 1000);
             });
