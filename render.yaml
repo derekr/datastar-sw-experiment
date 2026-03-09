@@ -1,0 +1,6 @@
+services:
+  - type: web
+    name: datastar-kanban
+    runtime: docker
+    plan: free
+    autoDeploy: false

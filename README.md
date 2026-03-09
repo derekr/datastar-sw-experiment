@@ -1,5 +1,7 @@
 # datastar_sw
 
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/derekr/datastar-sw-experiment)
+
 A local-first kanban board where the **service worker is the server**. The browser's main thread runs almost no JavaScript — [Datastar](https://data-star.dev) handles UI reactivity, and a [Hono](https://hono.dev) app inside the service worker handles all routing, rendering, persistence, and state management. Data lives in IndexedDB via [idb](https://github.com/nicolo-ribaudo/idb). An event-sourcing layer records every mutation for future cross-device sync.
 
 ![Boards list](screenshot-boards.png)
