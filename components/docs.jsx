@@ -377,6 +377,46 @@ return c.body(null, 204)`}</code></pre>
         </ul>
       </section>
 
+      <section class="docs-section">
+        <h2>What complexity disappears</h2>
+        <p>In a traditional SPA, every mutation handler must figure out what data the client needs to update the UI. Move a card and the column counts don't update because the response only returned the card. CQRS eliminates this entire category of bug.</p>
+        <ul class="docs-list">
+          <li><strong>Commands don't decide what to return.</strong> Every command returns <code>204</code>. The SSE handler is the single place that reads the full projection and renders the board. One read path, one render path.</li>
+          <li><strong>No stale siblings.</strong> In a request-response SPA, after a mutation you must figure out what <em>else</em> on the page is now stale — the <code>queryClient.invalidateQueries</code> problem. Did creating a card change the column count? The board header badge? With SSE push, the handler reads the entire board projection and pushes a complete morph. Everything is consistent by construction.</li>
+          <li><strong>Multi-client sync is free.</strong> Two tabs with the same board both have SSE streams. One tab creates a card, the bus fires, both streams push. No polling, no separate WebSocket layer, no "refetch on focus" logic.</li>
+          <li><strong>No optimistic update rollback.</strong> Traditional SPAs optimistically update the UI, send the mutation, and roll back on failure. This causes bugs: partial rollbacks, race conditions, flicker when the server response disagrees. Here, the latency between command and morph is near-zero (especially in the SW where it's in-process), so optimistic updates are unnecessary.</li>
+        </ul>
+      </section>
+
+      <section class="docs-section">
+        <h2>Single-flight mutations</h2>
+        <p>A common alternative is single-flight mutations — the mutation response <em>is</em> the updated data, one roundtrip. Frameworks like TanStack Query formalize this: you mutate, the response replaces the cache entry, and subscribed components re-render.</p>
+        <p>Single-flight solves the same problem (keeping the UI in sync) with opposite tradeoffs:</p>
+        <table class="docs-table">
+          <thead>
+            <tr><th></th><th>Single-flight</th><th>CQRS + SSE</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Response coupling</td><td>Command handler must format a response the UI can use</td><td>Command returns <code>204</code>. Read side handles rendering.</td></tr>
+            <tr><td>Stale data</td><td>Only the mutating client updates. Others need <code>invalidateQueries</code> or polling.</td><td>All connected clients get pushed the updated state.</td></tr>
+            <tr><td>Invalidation</td><td>Manual — you enumerate which queries are stale.</td><td>None — the SSE handler always reads full state.</td></tr>
+            <tr><td>Latency</td><td>One roundtrip for command + response.</td><td>Command + async push. Near-zero gap when in-process (SW) or local (Bun).</td></tr>
+          </tbody>
+        </table>
+        <p>In this architecture, single-flight would add response-formatting logic to every command handler for no benefit — the SSE stream is already open and the push latency is near-zero.</p>
+      </section>
+
+      <section class="docs-section">
+        <h2>Performance</h2>
+        <p>The common objection to CQRS is the "two roundtrips" — a command followed by a separate read. That assumes network latency between them, which doesn't exist when the server is in-process (SW) or local (Bun on the same machine).</p>
+        <ul class="docs-list">
+          <li><strong>The SSE stream is already open.</strong> No connection setup cost. The command posts, returns 204, and the bus dispatch triggers the SSE handler in the same microtask cycle.</li>
+          <li><strong>204 is faster than a formatted response.</strong> The command handler does less work (no reading state, no rendering HTML). The client gets its "command accepted" sooner.</li>
+          <li><strong>Natural batching.</strong> Rapid mutations (batch-move 5 cards) create multiple events in one <code>appendEvents</code> call, one bus notification, one SSE push of the final state. In request-response, each mutation needs its own response.</li>
+          <li><strong>The real cost is the full read.</strong> Every SSE push reads the board projection and renders full HTML. For reasonable card counts this is fast. Idiomorph diffs the DOM efficiently regardless of HTML payload size. At scale, partial pushes or read-model caching would help — but request-response would do the same read to format its response.</li>
+        </ul>
+      </section>
+
       <DocsPager topic={topic} />
     </DocsInner>
   )
@@ -1379,6 +1419,14 @@ useDbAdapter(createSqliteAdapter(Database, 'kanban.sqlite'))
 
 // In SW: no call needed — defaults to IndexedDB`}</code></pre>
         <p>The SW uses IndexedDB because it's the only option in a service worker. Bun uses SQLite because it's fast, durable, and handles concurrent reads without the quirks of IndexedDB transactions.</p>
+      </section>
+
+      <section class="docs-section">
+        <h2>Session isolation</h2>
+        <p>The SW runs in one browser for one user — isolation is free. The Bun server is shared. Without auth, every visitor would see everyone else's boards.</p>
+        <p>The fix is query-level filtering, not separate databases. Each visitor gets an <code>httpOnly</code> session cookie. Board creation stamps <code>sessionId</code> on the board record. <code>getBoards(sessionId)</code> filters at read time. A Hono middleware on <code>/boards/:boardId</code> returns 404 if the board's session doesn't match.</p>
+        <p>This works because of CQRS. The event bus fires broad topics like <code>boards:changed</code> that wake <em>every</em> SSE stream, not just the session that mutated. When Session A creates a board, Session B's boards-list stream hears the event, re-reads its own filtered board list (unchanged), and pushes a morph. Idiomorph diffs the identical HTML and does nothing. The push is redundant but correct — the read side always produces the right output for the requesting session.</p>
+        <p>Board-specific topics (<code>board:&lt;id&gt;:changed</code>) are naturally scoped — the session guard prevents cross-session board access, so Session B never has an SSE stream listening on Session A's board. The only cross-session noise is on the <code>boards:changed</code> and <code>events:changed</code> topics, which is negligible for a demo.</p>
       </section>
 
       <section class="docs-section">

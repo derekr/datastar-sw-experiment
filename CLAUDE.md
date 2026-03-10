@@ -68,6 +68,16 @@ Single-flight mutations (where the mutation response *is* the updated data, one 
 
 Net: same total work as request-response, different distribution, with multi-client sync at zero additional cost.
 
+### Session isolation (Bun only)
+
+The SW is single-user (one browser, one IndexedDB). The Bun server is shared — without isolation, every visitor sees everyone else's boards. Isolation uses query-level filtering, not separate databases.
+
+**How it works:** `runtime/bun-entry.ts` provides a `resolveSessionId` function via `runtimeConfig`. The middleware in `sw.jsx` calls it on every request and stores the result on the Hono context (`c.set('sessionId', ...)`). Board creation stamps `sessionId` on the `board.created` event data. `getBoards(sessionId)` filters at read time. A guard middleware on `/boards/:boardId` and `/boards/:boardId/*` returns 404 if the board's `sessionId` doesn't match. The SW provides no resolver, so `c.get('sessionId')` returns undefined and no filtering happens.
+
+**Why not per-session SQLite:** The app has ~8 module-level singletons (db adapter, event bus, actorId, initialized flag, boardUIState, undoStacks, etc.) that assume single-tenant. Per-session databases would require `AsyncLocalStorage` to scope all of them, plus changing every `dbPromise` reference to a session-aware lookup. Query-level filtering achieves the same user-facing isolation with minimal code changes.
+
+**Bus scoping trade-off:** The event bus fires `boards:changed` for all board mutations, waking every session's boards-list SSE stream. Each stream re-reads its own filtered board list and pushes a morph. For other sessions the HTML is unchanged, so Idiomorph no-ops. Board-specific topics (`board:<id>:changed`) are naturally scoped — the session guard prevents cross-session board access, so no session has an SSE stream listening on another session's board ID. The only cross-session noise is on broad topics (`boards:changed`, `events:changed`), which is negligible for a demo. To eliminate it, prefix those topics with session ID in `appendEvents()` and the SSE listeners.
+
 ## Conventions
 
 ### All client-facing URLs use `base()`
