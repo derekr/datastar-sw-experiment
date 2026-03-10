@@ -104,9 +104,15 @@ export default function serviceWorkerPlugin() {
       }
     },
 
-    generateBundle() {
-      // Prod only: emit hashed asset files into the bundle.
+    async generateBundle() {
+      // Prod only: build SW as IIFE and emit alongside hashed asset files.
       if (config.command === 'build') {
+        await buildSW();
+        this.emitFile({
+          type: 'asset',
+          fileName: 'sw.js',
+          source: swCode,
+        });
         for (const asset of BUNDLED_ASSETS) {
           const content = fs.readFileSync(path.resolve(config.root, asset.source));
           const hash = hashContent(content);

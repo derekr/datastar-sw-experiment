@@ -12,12 +12,6 @@ export default defineConfig({
     rollupOptions: {
       input: {
         main: './index.html',
-        sw: './sw.jsx',
-      },
-      output: {
-        entryFileNames: (chunkInfo) => {
-          return chunkInfo.name === 'sw' ? 'sw.js' : '[name]-[hash].js';
-        },
       },
     },
   },
