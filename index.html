@@ -19,7 +19,7 @@
   <script type="module">
     if ('serviceWorker' in navigator) {
       try {
-        const swURL = new URL('sw.js', import.meta.url).href;
+        const swURL = new URL('sw.js', document.baseURI).href;
         const reg = await navigator.serviceWorker.register(swURL, { type: 'module', updateViaCache: 'none' });
 
         // Single reload gate — prevents double-reload from both
